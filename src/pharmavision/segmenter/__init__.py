@@ -15,6 +15,8 @@ class Mask:
 
     pixels: NDArray[np.bool_]
     confidence: float | None = None
+    object_id: str | None = None
+    """The object's identity across the frames of one video, where the backend tracks one."""
 
 
 @dataclass(frozen=True)

@@ -4,12 +4,15 @@ import subprocess
 from pathlib import Path
 
 
-def make_video(path: Path, seconds: float, fps: int = 25, size: int = 360) -> Path:
-    """A plain grey clip with an audio track, as a phone recording would have."""
+def make_video(
+    path: Path, seconds: float, fps: int = 25, size: int = 360, height: int | None = None
+) -> Path:
+    """A plain grey clip with an audio track, as a phone recording would have. Square unless
+    `height` is given."""
     subprocess.run(
         [
             "ffmpeg", "-v", "error", "-y",
-            "-f", "lavfi", "-i", f"color=c=gray:s={size}x{size}:r={fps}:d={seconds}",
+            "-f", "lavfi", "-i", f"color=c=gray:s={size}x{height or size}:r={fps}:d={seconds}",
             "-f", "lavfi", "-i", f"sine=frequency=440:duration={seconds}",
             "-c:v", "mpeg4", "-c:a", "aac", "-shortest",
             str(path),
