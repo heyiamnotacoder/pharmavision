@@ -1,0 +1,70 @@
+"""The animal's trajectory: centroids with short gaps interpolated and long gaps kept."""
+
+import itertools
+from collections.abc import Sequence
+from typing import NamedTuple
+
+import numpy as np
+from numpy.lib.stride_tricks import sliding_window_view
+
+from ..artifacts import Gap
+from .geometry import Point
+
+
+class Trajectory(NamedTuple):
+    points: list[Point | None]
+    """One per frame; None where the animal was not found and the gap was too long to bridge."""
+    gaps: list[Gap]
+
+
+def clean_trajectory(
+    positions: Sequence[Point | None], fps: float, max_gap_s: float, median_window: int
+) -> Trajectory:
+    """Linear interpolation across each gap that lasts at most `max_gap_s` and has a detection
+    on both sides (a gap at the start or end of the track has nothing to interpolate from), then
+    a median filter over each stretch without a gap, so one-frame mis-detections don't count as
+    movement. The filter never reaches across a gap that was kept."""
+    points = list(positions)
+    gaps: list[Gap] = []
+    for first, last in _gap_spans(positions):
+        before = positions[first - 1] if first > 0 else None
+        after = positions[last + 1] if last + 1 < len(positions) else None
+        n = last - first + 1
+        if before is None or after is None or n / fps > max_gap_s:
+            gaps.append(Gap(first_frame=first, last_frame=last, interpolated=False))
+            continue
+        (x0, y0), (x1, y1) = before, after
+        for k in range(1, n + 1):
+            t = k / (n + 1)
+            points[first + k - 1] = (x0 + t * (x1 - x0), y0 + t * (y1 - y0))
+        gaps.append(Gap(first_frame=first, last_frame=last, interpolated=True))
+    return Trajectory(_median_filtered(points, median_window), gaps)
+
+
+def _median_filtered(points: list[Point | None], window: int) -> list[Point | None]:
+    """Per-axis running median over each stretch of positions; the ends repeat their edge
+    value, so a stretch keeps its length and its endpoints aren't pulled toward zero."""
+    filtered: list[Point | None] = []
+    for missing, run in itertools.groupby(points, key=lambda p: p is None):
+        stretch = list(run)
+        if missing:
+            filtered.extend(stretch)
+            continue
+        padded = np.pad(np.array(stretch, dtype=np.float64), ((window // 2,) * 2, (0, 0)), "edge")
+        medians: list[list[float]] = np.median(
+            sliding_window_view(padded, window, axis=0), axis=-1
+        ).tolist()
+        filtered.extend((x, y) for x, y in medians)
+    return filtered
+
+
+def _gap_spans(positions: Sequence[Point | None]) -> list[tuple[int, int]]:
+    """First and last frame of each run of missing positions."""
+    spans: list[tuple[int, int]] = []
+    index = 0
+    for missing, run in itertools.groupby(positions, key=lambda p: p is None):
+        length = len(list(run))
+        if missing:
+            spans.append((index, index + length - 1))
+        index += length
+    return spans
