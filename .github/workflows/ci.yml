@@ -33,7 +33,7 @@ jobs:
 
       - name: Detect frontend
         id: frontend
-        run: echo "present=$([[ -f frontend/package.json ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+        run: echo "present=$([[ -f frontend/package-lock.json ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-node@v4
         if: steps.frontend.outputs.present == 'true'

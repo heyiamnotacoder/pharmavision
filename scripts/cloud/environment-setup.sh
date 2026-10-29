@@ -31,7 +31,8 @@ fi
 
 # 2. Python dependency cache
 warm_python() {
-  command -v uv >/dev/null || pip install -q uv || return 1
+  # The image ships uv; if not, system pip needs --break-system-packages (PEP 668 on 24.04).
+  command -v uv >/dev/null || pip install -q --break-system-packages uv || return 1
   local py
   py="$(command -v python3.12 || true)"
   [[ -n "$py" ]] || { uv python install 3.12 && py=3.12; } || return 1
@@ -54,15 +55,17 @@ if warm_python; then log "python cache warm"; else log "python cache warm-up fai
 # 3. Personal instructions for every cloud session
 mkdir -p ~/.claude
 cat > ~/.claude/CLAUDE.md <<'EOF'
-## Global rules (copied from the laptop's ~/.claude/CLAUDE.md)
-- User: Dhruvik, Junior Resident, MD Pharmacology, AIIMS Jodhpur.
+## Personal rules (from the laptop's ~/.claude/CLAUDE.md and saved preferences)
 - Before deleting any infrastructure, ask whether the deletion can be undone. If not, ask the user first.
 - File search: use ripgrep. `rg --files` lists files; `rg PATTERN` searches contents. Don't use find or grep for those jobs.
+- When starting a new project or feature, discuss the best-suited architecture first.
 - Write or design tests first, then code. Don't spam tests: few end-to-end tests, more small focused ones. Use type checks and linters.
-- For every change: create a PR → run code review on it → fix → merge to main.
+- For every change or commit: create a PR → run code review on it → fix → merge to main.
 - Highlight what matters in every reply: `inline code` for key terms, **bold** for key phrases.
 - Explain with schematic diagrams, flowcharts and tables rather than long prose.
 EOF
+# Left out on purpose: the user's name and institution (this file lives in a public repo) and the
+# laptop rules for tools cloud sessions don't have (Context7, Firecrawl, docling, Chrome).
 log "wrote ~/.claude/CLAUDE.md"
 
 log "done"

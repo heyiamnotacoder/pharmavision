@@ -52,7 +52,7 @@ Hackathon project scoring: **Impact 30%**, **Use of Meta AI tooling 25%**, **Dem
 | NFR-2 | **Reproducible.** The same video, config and model versions give the same metrics. Thresholds are versioned in the manifest and model responses are cached by input hash. |
 | NFR-3 | **Auditable.** Every metric links back to frames. Every exclusion has a reason. Every statistical test records why it was chosen. |
 | NFR-4 | **Budget.** Total Meta Model API spend across development and eval stays within $150. Projected cost per video is logged. |
-| NFR-5 | **Throughput.** A 10-min video completes end to end in a time suitable for the demo (target to be set after the Day 1 spike). The demo uses precomputed runs plus one live run. |
+| NFR-5 | **Throughput.** A 10-min video completes end to end in a time suitable for the demo (target to be set after the spike on Oct 29). The demo uses precomputed runs plus one live run. |
 | NFR-6 | **Type safety.** Pydantic models at every stage boundary. `pyright` strict and `ruff` clean on `measure/` and `stats/`. TypeScript strict on the frontend. |
 | NFR-7 | **Honest framing.** The UI and README say this is a research tool, not validated for regulatory GLP studies. |
 
@@ -63,7 +63,9 @@ Hackathon project scoring: **Impact 30%**, **Use of Meta AI tooling 25%**, **Dem
   mask for immobility).
 - **Contract:** each stage reads fixture artifacts and writes artifacts that validate against their
   Pydantic types. Model calls are replaced by recorded responses.
-- **End to end, few:** one short clip through the whole pipeline with live models, run before each merge to main.
+- **End to end, few:** one short clip through the whole pipeline with live models, run on the laptop
+  (it needs `MODEL_API_KEY`) before merging a PR that changes a model call. CI and cloud sessions
+  use recorded responses.
 - **Eval:** the Sturman harness. It's a measurement, not a pass/fail test, except for the 100%
   number-audit rate.
 
@@ -115,6 +117,7 @@ Re-planned on Oct 29 (Day 4): no code existed yet, so Days 1–3 were folded int
 
 Build happens in cloud sessions; the spike and the eval run on the laptop, because they call the
 Meta API with the real key and read the Sturman data. One PR per stage or feature, reviewed
-before merge (see `CLAUDE.md`, Workflow).
+before merge (see `CLAUDE.md`, Workflow). When the design grilling ends, `/to-tickets` turns this
+plan into GitHub issues: one per stage, with blocking links, labelled `ready-for-agent`.
 
 Workshops and office hours run Oct 27 – Nov 4. Take SAM and API questions there early.

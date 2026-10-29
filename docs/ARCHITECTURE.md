@@ -3,7 +3,7 @@
 Status: **proposal**, written Oct 21, 2026, before the build. API shapes, limits and dataset
 contents were checked against Meta's docs, PyPI, Zenodo and GitHub on Oct 21 (see
 [Verified facts](#verified-facts-oct-21-2026)). The open decisions at the end must be settled in
-the Day 1 spike.
+the spike (Oct 29).
 
 ## Shape
 
@@ -210,13 +210,13 @@ the demo and write-up, the same way PaedScale published its validation table.
   before running the full eval.
 - Prices (third-party trackers, confirm on Meta's pricing page): `muse-spark-1.3` about
   $1.25 input / $4.25 output per million tokens. `muse-wonder-1.0` (preview) about $4 / $20, so
-  only consider it for the report step. **SAM 3.1 pricing was not found online**; measure it on Day 1.
+  only consider it for the report step. **SAM 3.1 pricing was not found online**; measure it in the spike (Oct 29).
 - The **Contributor tier** (`muse-spark-1.3-contributor`, about $0.10 / $0.20) lets Meta train on
   prompts and outputs, with lower rate limits (reported 100 RPM vs 3,000 RPM). It's acceptable for
   the public-dataset eval only, never for a lab's own videos. **Decided:** use it for the Sturman
   eval and for development on Sturman clips; the tier is a config value, standard tier otherwise.
 
-## Open decisions (settle in the Day 1 spike)
+## Open decisions (settle in the spike, Oct 29)
 
 1. **SAM 3.1 cost and latency.** Video tracking on the API is confirmed. Still unknown: price, and
    wall-clock time for a 9,000-frame video. Measure one Sturman video end to end. **Rule:** stay on
@@ -244,4 +244,4 @@ the demo and write-up, the same way PaedScale published its validation table.
 | `meta-sam-parser` 0.1.0 on PyPI, Python ≥ 3.10, SAM License (publications must acknowledge SAM). | [PyPI](https://pypi.org/project/meta-sam-parser/), [client libraries](https://dev.meta.ai/docs/sam/client-libraries.md) |
 | Files API: 1 GiB per upload, 50 MB inline, 100 GiB per team, no expiry by default. Muse Spark video input is MP4 only. | [File handling](https://dev.meta.ai/docs/file-handling.md), [Video understanding](https://dev.meta.ai/docs/video-understanding.md) |
 | Sturman videos: CC BY 4.0, top view, 2.5 GB; labels as in the eval table above. | [Zenodo 3608658](https://zenodo.org/records/3608658), [DLCAnalyzer](https://github.com/ETHZ-INS/DLCAnalyzer) |
-| Not found online: SAM 3.1 pricing, Muse Spark video duration limit, frame sampling rate for video understanding. | Measure in the Day 1 spike |
+| Not found online: SAM 3.1 pricing, Muse Spark video duration limit, frame sampling rate for video understanding. | Measure in the spike (Oct 29) |

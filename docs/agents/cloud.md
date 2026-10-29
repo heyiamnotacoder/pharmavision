@@ -44,7 +44,9 @@ fix → check.sh → push ──────────────▶ CI again
    - **Environment variables:** none needed. Don't put `MODEL_API_KEY` here: anyone using the
      environment can read its variables, and cloud work doesn't call the Meta API.
 3. **Session-start hook.** `.claude/settings.json` runs `scripts/cloud/session-start.sh` at every
-   cloud session start (it exits at once on the laptop). It also blocks reads of `.env`.
+   cloud session start (it exits at once on the laptop). It also stops Claude's Read tool from
+   opening `.env`. A shell command could still read the file, so keep the real key on the laptop
+   only.
 4. **First cloud session.** Ask Claude to run `scripts/check.sh` and `/context`. Expect all checks
    green, and `/root/.claude/CLAUDE.md` under Memory files.
 
@@ -60,9 +62,10 @@ fix → check.sh → push ──────────────▶ CI again
 
 ## Limits to know
 
-- **Branch protection is off.** GitHub refuses it on a private repo without GitHub Pro. "Green CI
-  and a review before merge" is a workflow rule until the repo goes public (it must be public by
-  Nov 4 anyway); then require the `lint · typecheck · test` check on `main`.
+- **Branch protection is off.** GitHub refuses it on a private repo without GitHub Pro. Until the
+  repo goes public (it must be public by Nov 4 anyway), "green CI and a review before merge" is
+  enforced by the workflow rule only, not by GitHub. Once it's public, require the
+  `lint · typecheck · test` check on `main`.
 - **Cloud VM:** 4 vCPU, 16 GB RAM, 30 GB disk; foreground commands time out at 2 minutes by default
   (`BASH_DEFAULT_TIMEOUT_MS` on the environment raises it).
 - **Setup script changes** take effect when the cache rebuilds (on edit, or after about 7 days).

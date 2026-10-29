@@ -30,7 +30,7 @@ git -C "$src" checkout --quiet "$PIN"
 mkdir -p "$dest"
 for name in "${SKILLS[@]}"; do
   # Skills live under skills/<category>/<name>/; the category isn't part of the skill's identity.
-  skill_dir="$(find "$src/skills" -mindepth 2 -maxdepth 2 -type d -name "$name" | head -n 1)"
+  skill_dir="$(find "$src/skills" -mindepth 2 -maxdepth 2 -type d -name "$name" -print -quit)"
   if [[ -z "$skill_dir" ]]; then
     echo "missing upstream at $PIN: $name" >&2
     exit 1
