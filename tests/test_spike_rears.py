@@ -4,6 +4,7 @@ from pathlib import Path
 
 from spike.rears import (
     Rear,
+    RearKind,
     agreement,
     clip_window,
     consensus_rears,
@@ -39,8 +40,8 @@ def test_load_rears_keeps_only_rears_keyed_by_video_id(tmp_path: Path) -> None:
     ]
 
 
-def rear(rater: str, start: float, end: float, kind: str = "supported") -> Rear:
-    return Rear(video_id="OFT_5", rater=rater, start=start, end=end, kind=kind)  # type: ignore[arg-type]
+def rear(rater: str, start: float, end: float, kind: RearKind = "supported") -> Rear:
+    return Rear(video_id="OFT_5", rater=rater, start=start, end=end, kind=kind)
 
 
 def test_consensus_keeps_a_rear_two_raters_agree_on_once() -> None:
@@ -87,11 +88,10 @@ def test_split_is_6_train_14_eval_and_ignores_input_order() -> None:
 
 def test_pick_clips_uses_train_videos_only_and_balances_labels() -> None:
     def video_rears(video_id: str) -> list[Rear]:
+        kinds: list[RearKind] = ["unsupported", "supported"] * 4
         return [
-            Rear(video_id, rater, start, start + 1.0, kind)  # type: ignore[arg-type]
-            for start, kind in [
-                (20.0 * k, "supported" if k % 2 else "unsupported") for k in range(1, 9)
-            ]
+            Rear(video_id, rater, 20.0 * k, 20.0 * k + 1.0, kind)
+            for k, kind in enumerate(kinds, start=1)
             for rater in ("Furkan", "Jin")
         ]
 
