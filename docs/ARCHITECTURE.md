@@ -28,8 +28,11 @@ runs/<run_id>/
   metrics.json       # per-animal metric table (measures)
   events.parquet     # behaviour events: start, end, label, confidence, source (rule | model)
   qc.json            # flags with frame ranges and severity
-  llm_cache/         # model responses keyed by input hash
 ```
+
+Model responses live outside any one run, in `runs/model_cache/<model>/<prompt version>/<input
+hash>.jsonl.gz` (the raw event stream, the same format as the test fixtures), so re-running a
+video in a new run folder costs nothing.
 
 A study is a set of runs plus `study.yaml` (groups, treatment, dose, blinding codes, arena template).
 Stats and report run at study level.
@@ -107,7 +110,17 @@ class Segmenter(Protocol):
 `SyntheticSegmenter` stands in for SAM 3.1 in tests: it draws a scripted floor and trajectory,
 and can skip frames or deliver them out of order like the real stream.
 
-- `MetaApiSegmenter`: **primary**. The Model API supports SAM 3.1 video tracking.
+- `MetaApiSegmenter` (`segmenter/meta_api.py`, T4): **primary**. The Model API supports SAM 3.1
+  video tracking. Chosen by `make_segmenter(MetaApiSettings(...))` in `segmenter/config.py`.
+  It keeps the `max_objects` most confident instances per frame. Videos over
+  `max_frames_per_request` go in chunks overlapping by `chunk_overlap_frames` (150), each cut
+  frame-exact with ffmpeg and uploaded on its own; a chunk's objects take the previous chunk's
+  ids by mask IoU ≥ 0.5, averaged over the overlap frames where either object appears, and the
+  overlap is handed over at its middle. Frame counts are exact (ffprobe packet count).
+  The cache key is the video's hash, the frame span, the prompt and the request metadata, so a
+  cached re-run uploads nothing and needs no API key. Cost: `meta-sam-parser` is pure Python,
+  about 15 ms per frame to parse and as much again to decode, so a 9,000-frame video takes
+  about 4–5 min of CPU after the API returns.
 - `SelfHostedSegmenter`: fallback only, if API price or latency rules it out. Uses open weights
   (`facebook/sam3.1`, gated on Hugging Face) on a Modal GPU.
 
@@ -219,7 +232,7 @@ the demo and write-up, the same way PaedScale published its validation table.
 
 - Muse Spark sees candidate clips and flagged windows only. A 10-minute video should need tens of
   calls, not thousands.
-- `llm_cache/` is keyed by (model id, prompt version, clip hash). Re-runs are free.
+- `runs/model_cache/` is keyed by (model id, prompt version, input hash). Re-runs are free.
 - `eval/` runs log tokens per video so total spend can be projected against the $150 budget
   before running the full eval.
 - Prices (third-party trackers, confirm on Meta's pricing page): `muse-spark-1.3` about
