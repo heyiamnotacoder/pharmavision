@@ -118,10 +118,10 @@ This is the most heavily tested module.
 | Metric | Method |
 |---|---|
 | Trajectory | Linear interpolation across gaps of at most `max_gap_s` with a detection on both sides; longer gaps, and gaps at either end, stay gaps and are listed in `metrics.json` for QC. Then a median filter (`median_window_frames`) on the centroids of each stretch without a gap. |
-| Distance, velocity | Sum of steps between consecutive frames that both have a position, ÷ `px_per_cm`. A kept gap is not bridged. Mean velocity is that distance over the time its steps took. |
-| Zone time and entries | Signed distance of the centroid to the zone edge. Entering takes `zone_hysteresis_cm` inside the edge and leaving takes that far outside; a visit or absence shorter than `min_dwell_s` leaves the state as it was. Entries count moves from outside to inside, so starting in the zone is not an entry. Mask-overlap fraction (EPM convention) comes with the EPM template. |
+| Distance, velocity | Sum of steps between consecutive frames that both have a position, ÷ `px_per_cm`. A kept gap is not bridged. Mean velocity is that distance over the time its steps took. The median filter replaces the earlier idea of zeroing movement below a jitter threshold, so there is one smoothing step, not two. |
+| Zone time and entries | Signed distance of the centroid to the zone edge. Entering takes `zone_hysteresis_cm` inside the edge and leaving takes that far outside; while a visit or absence is shorter than `min_dwell_s`, the shortest flips and merges with its neighbours, so a visit broken by flickers survives and flickers alone vanish. Both guards restart after a kept gap. Entries count moves from outside to inside (across a gap too), so starting in the zone is not an entry. Mask-overlap fraction (EPM convention) comes with the EPM template. |
 | Thigmotaxis | Fraction of frames with a known position within `thigmotaxis_wall_cm` of the floor-polygon edge (or beyond it). |
-| Immobility | Mask change between consecutive frames, 1 − IoU on the stored RLE, below `immobility_change_max`, in bouts of at least `immobility_min_s`. Frame 0 takes the change to frame 1. |
+| Immobility | Mask change between consecutive frames, 1 − IoU on the stored RLE. A bout is a stretch of changes below `immobility_change_max`; k of them join k + 1 frames, and the bout counts if those frames last at least `immobility_min_s`. |
 | Freezing | Velocity and mask change both below threshold for ≥ the minimum duration. |
 | Rear candidates | Rule-based windows: mask area drop + elongation change + low centroid velocity. These are *candidates* for stage 5, not results. |
 

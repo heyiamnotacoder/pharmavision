@@ -1,6 +1,5 @@
 """The animal's trajectory: centroids with short gaps interpolated and long gaps kept."""
 
-import itertools
 from collections.abc import Sequence
 from typing import NamedTuple
 
@@ -9,6 +8,7 @@ from numpy.lib.stride_tricks import sliding_window_view
 
 from ..artifacts import Gap
 from .geometry import Point
+from .stretches import stretches
 
 
 class Trajectory(NamedTuple):
@@ -44,27 +44,24 @@ def clean_trajectory(
 def _median_filtered(points: list[Point | None], window: int) -> list[Point | None]:
     """Per-axis running median over each stretch of positions; the ends repeat their edge
     value, so a stretch keeps its length and its endpoints aren't pulled toward zero."""
-    filtered: list[Point | None] = []
-    for missing, run in itertools.groupby(points, key=lambda p: p is None):
-        stretch = list(run)
-        if missing:
-            filtered.extend(stretch)
+    filtered = list(points)
+    for stretch in stretches(p is None for p in points):
+        if stretch.value:
             continue
-        padded = np.pad(np.array(stretch, dtype=np.float64), ((window // 2,) * 2, (0, 0)), "edge")
+        end = stretch.start + stretch.length
+        xy = np.array(points[stretch.start : end], dtype=np.float64)
+        padded = np.pad(xy, ((window // 2,) * 2, (0, 0)), "edge")
         medians: list[list[float]] = np.median(
             sliding_window_view(padded, window, axis=0), axis=-1
         ).tolist()
-        filtered.extend((x, y) for x, y in medians)
+        filtered[stretch.start : end] = [(x, y) for x, y in medians]
     return filtered
 
 
 def _gap_spans(positions: Sequence[Point | None]) -> list[tuple[int, int]]:
-    """First and last frame of each run of missing positions."""
-    spans: list[tuple[int, int]] = []
-    index = 0
-    for missing, run in itertools.groupby(positions, key=lambda p: p is None):
-        length = len(list(run))
-        if missing:
-            spans.append((index, index + length - 1))
-        index += length
-    return spans
+    """First and last frame of each stretch of missing positions."""
+    return [
+        (s.start, s.start + s.length - 1)
+        for s in stretches(p is None for p in positions)
+        if s.value
+    ]

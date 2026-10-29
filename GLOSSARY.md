@@ -17,5 +17,5 @@ A set of trials together with their design: groups, treatment, dose and blinding
 _Avoid_: Experiment, batch, project
 
 **Gap**:
-A run of frames where the tracker found no animal. Short gaps are bridged by linear interpolation; longer ones stay missing in every metric and go to QC.
+A stretch of consecutive frames where the tracker found no animal. Short gaps are bridged by linear interpolation; longer ones stay missing in every metric and go to QC.
 _Avoid_: Dropout, missing frame (for the whole run)

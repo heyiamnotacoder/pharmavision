@@ -194,8 +194,7 @@ def test_an_animal_never_found_leaves_every_metric_unknown(tmp_path: Path, runs_
     assert not any(f.detected for f in run.track().frames)
     metrics = run.metrics()
     assert metrics.gaps == [Gap(first_frame=0, last_frame=N_FRAMES - 1, interpolated=False)]
-    unknown = metrics.model_dump(exclude={"gaps"})
-    assert unknown == dict.fromkeys(unknown)
+    assert all(value is None for value in metrics.model_dump(exclude={"gaps"}).values())
 
 
 def test_the_manifest_records_the_versioned_measure_settings(
@@ -284,6 +283,35 @@ def test_jitter_on_the_centre_zone_edge_adds_no_entries(
     assert run.metrics().centre_entries == 1
 
 
+def test_a_visit_broken_by_brief_mis_detections_counts_once(tmp_path: Path, runs_dir: Path) -> None:
+    # In the centre for frames 15-51, but detected in the periphery for 3 frames 4 times. The
+    # 5-frame stretches between them are each shorter than the minimum dwell; the visit is not.
+    def visit(i: int) -> tuple[float, float]:
+        glitch = i in {*range(20, 23), *range(28, 31), *range(36, 39), *range(44, 47)}
+        return (180.0, 180.0) if 15 <= i < 52 and not glitch else (50.0, 180.0)
+
+    run = finished_run(tmp_path, runs_dir, visit)
+
+    metrics = run.metrics()
+    assert metrics.centre_entries == 1
+    assert metrics.centre_time_s == pytest.approx(37 / 15)
+
+
+def test_a_long_gap_does_not_join_two_glimpses_into_a_visit(tmp_path: Path, runs_dir: Path) -> None:
+    # Two 5-frame glimpses of the centre, each shorter than the minimum dwell, on either side of
+    # a 1 s gap that is too long to interpolate.
+    def glimpses(i: int) -> tuple[float, float] | None:
+        if 25 <= i < 40:
+            return None
+        return (180.0, 180.0) if 20 <= i < 45 else (50.0, 180.0)
+
+    run = finished_run(tmp_path, runs_dir, glimpses)
+
+    metrics = run.metrics()
+    assert metrics.centre_entries == 0
+    assert metrics.centre_time_s == 0
+
+
 def test_wall_hugging_gives_the_known_thigmotaxis(tmp_path: Path, runs_dir: Path) -> None:
     # 45 frames walking along the left wall 2 cm from it, then 15 frames in the middle.
     def hug(i: int) -> tuple[float, float]:
@@ -303,18 +331,20 @@ def test_a_static_mask_gives_full_immobility(tmp_path: Path, runs_dir: Path) -> 
 def test_only_pauses_of_the_minimum_duration_count_as_immobility(
     tmp_path: Path, runs_dir: Path
 ) -> None:
-    # Walking 3 px per frame, with a 9-frame pause (frames 11-19, 0.6 s) and a 24-frame pause
-    # (frames 36-59, 1.6 s). Immobility bouts must last at least 1 s.
+    # Walking 3 px per frame, with a pause of 10 identical frames (10-19, 0.67 s) and one of
+    # exactly 15 (30-44, 1 s) in mid-video. Immobility bouts must last at least 1 s.
     def progress(i: int) -> int:
         if i < 10:
             return i
         if i < 20:
             return 10
-        return i - 9 if i < 35 else 26
+        if i < 30:
+            return i - 9
+        return 21 if i < 45 else i - 23
 
     run = finished_run(tmp_path, runs_dir, lambda i: (90.0 + 3 * progress(i), 180.0))
 
-    assert run.metrics().immobility_s == pytest.approx(24 / 15)
+    assert run.metrics().immobility_s == pytest.approx(15 / 15)
 
 
 def test_the_same_video_and_settings_give_identical_metrics(tmp_path: Path, runs_dir: Path) -> None:
