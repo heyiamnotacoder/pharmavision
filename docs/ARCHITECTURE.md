@@ -57,7 +57,8 @@ video format both SAM 3.1 and Muse Spark accept.
   - forced swim: "water cylinder"
   SAM 3.1 takes **one concept per request**, so each zone prompt is a separate call.
 - **Derived zones are geometry, not prompts.** The open-field centre zone is the inner X% of the
-  floor polygon, computed in Python.
+  floor polygon **by area** (the floor shrunk about its centroid), computed in Python. The open
+  field template uses 50%, as Sturman et al. 2020 did (45 × 45 cm arena, 10 min).
 - Calibration: `px_per_cm` comes from the floor polygon and the arena's real dimensions in the template.
   The Sturman camera has a wide-angle lens and a tilted view: the square floor spans 387 × 313 px,
   so calibrate x and y separately (or fit a 4-corner homography), not with one `px_per_cm`
@@ -97,9 +98,14 @@ video format both SAM 3.1 and Muse Spark accept.
 
 ```python
 class Segmenter(Protocol):
-    def segment_image(self, frame: Frame, prompt: str) -> list[Mask]: ...
+    model_id: str  # recorded in the manifest per stage
+
+    def segment_image(self, image: NDArray[np.uint8], prompt: str) -> list[Mask]: ...
     def track_video(self, video: Path, prompt: str, max_objects: int) -> Iterator[FrameMasks]: ...
 ```
+
+`SyntheticSegmenter` stands in for SAM 3.1 in tests: it draws a scripted floor and trajectory,
+and can skip frames or deliver them out of order like the real stream.
 
 - `MetaApiSegmenter`: **primary**. The Model API supports SAM 3.1 video tracking.
 - `SelfHostedSegmenter`: fallback only, if API price or latency rules it out. Uses open weights

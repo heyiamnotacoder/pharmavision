@@ -28,6 +28,10 @@ jobs:
       - name: Python 3.12
         run: uv python install 3.12
 
+      # Ingest normalises video with ffmpeg; the pipeline tests run it for real.
+      - name: ffmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends ffmpeg
+
       - name: Install Python dependencies
         run: uv sync --locked
 
