@@ -3,6 +3,8 @@
 import math
 from collections.abc import Sequence
 
+import numpy as np
+
 Point = tuple[float, float]
 
 
@@ -33,6 +35,29 @@ def px_per_cm(floor: Sequence[Point], width_cm: float, height_cm: float) -> floa
     """Scale from the floor's pixel area and its real size. Using area, not edge length, keeps
     it independent of rotation and of how many vertices the polygon has."""
     return math.sqrt(polygon_area(floor) / (width_cm * height_cm))
+
+
+def signed_distance(points: Sequence[Point], polygon: Sequence[Point]) -> list[float]:
+    """Distance from each point to the polygon's edge: positive inside, negative outside."""
+    if not points:
+        return []
+    p = np.asarray(points, dtype=np.float64)[:, None, :]  # (points, 1, xy)
+    a = np.asarray(polygon, dtype=np.float64)[None, :, :]  # (1, edges, xy)
+    ab = np.roll(a, -1, axis=1) - a
+    length_sq = (ab**2).sum(axis=-1)
+    ap = p - a
+    # Closest point on each edge: the projection, clamped to the segment.
+    t = np.clip((ap * ab).sum(axis=-1) / np.where(length_sq > 0, length_sq, 1.0), 0.0, 1.0)
+    distance = np.sqrt(((ap - t[..., None] * ab) ** 2).sum(axis=-1)).min(axis=1)
+    # Even-odd rule: a ray to the right of the point crosses the edge.
+    ay, by, ax = a[..., 1], a[..., 1] + ab[..., 1], a[..., 0]
+    py, px = p[..., 1], p[..., 0]
+    straddles = (ay > py) != (by > py)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        crossing_x = ax + (py - ay) * ab[..., 0] / ab[..., 1]
+    inside = (straddles & (px < crossing_x)).sum(axis=1) % 2 == 1
+    signed: list[float] = np.where(inside, distance, -distance).tolist()
+    return signed
 
 
 def _signed_area(polygon: Sequence[Point]) -> float:

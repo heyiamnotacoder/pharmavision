@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pyarrow as pa
 import pyarrow.parquet as pq
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .measure.geometry import Point
 from .templates import TestTemplate
@@ -54,6 +54,36 @@ class ArenaSettings(Artifact):
     """Floor outline simplification, as a fraction of its perimeter."""
 
 
+class MeasureSettings(Artifact):
+    """Every threshold the measure stage uses. Times are in seconds and distances in cm, so a
+    setting means the same at any fps or frame size."""
+
+    version: int = 1
+    """Bump when a default or a metric's definition changes, so metrics from different versions
+    are never compared as if alike."""
+    median_window_frames: int = Field(default=5, ge=1)
+    """Median filter on the centroid trajectory, in frames at the ingest fps. Odd."""
+    max_gap_s: float = Field(default=0.5, ge=0)
+    """Gaps up to this long are linearly interpolated; longer gaps stay gaps."""
+    zone_hysteresis_cm: float = Field(default=1.0, ge=0)
+    """Entering a zone takes this far inside its edge, leaving it this far outside."""
+    min_dwell_s: float = Field(default=0.5, ge=0)
+    """A zone visit (or an absence) shorter than this doesn't change the zone state."""
+    thigmotaxis_wall_cm: float = Field(default=5.0, gt=0)
+    """Near the wall: within this distance of the floor edge, about two mouse body widths."""
+    immobility_change_max: float = Field(default=0.05, ge=0, le=1)
+    """Immobile frame: below this fraction of mask pixels changed since the previous frame
+    (symmetric difference over union)."""
+    immobility_min_s: float = Field(default=1.0, ge=0)
+    """Immobile frames count only in bouts at least this long."""
+
+    @model_validator(mode="after")
+    def _median_window_is_odd(self) -> "MeasureSettings":
+        if self.median_window_frames % 2 == 0:
+            raise ValueError(f"median_window_frames must be odd, not {self.median_window_frames}")
+        return self
+
+
 class Manifest(Artifact):
     run_id: str
     created_at: datetime
@@ -61,6 +91,7 @@ class Manifest(Artifact):
     template: TestTemplate
     ingest: IngestSettings
     arena: ArenaSettings
+    measure: MeasureSettings
     source: SourceVideo
     video: NormalisedVideo
     models: dict[str, str] = {}
@@ -135,10 +166,26 @@ class Track(Artifact):
         return self
 
 
+class Gap(Artifact):
+    """A run of frames where the animal was not found. Interpolated gaps were short enough to
+    bridge with a straight line; the rest stay missing in every metric and are left for QC."""
+
+    first_frame: int
+    last_frame: int
+    interpolated: bool
+
+
 class Metrics(Artifact):
     """Per-trial metrics. None means the metric could not be computed, never zero."""
 
     distance_travelled_cm: float | None
+    mean_velocity_cm_s: float | None
+    centre_time_s: float | None
+    centre_entries: int | None
+    thigmotaxis: float | None
+    """Fraction of the time with a known position spent near the wall, 0 to 1."""
+    immobility_s: float | None
+    gaps: list[Gap]
 
 
 @dataclass(frozen=True)

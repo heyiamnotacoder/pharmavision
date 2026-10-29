@@ -21,7 +21,7 @@ Run folder layout, one per video:
 
 ```
 runs/<run_id>/
-  manifest.json      # input hash, fps, frame size, test type, arena dims, code + model versions
+  manifest.json      # input hash, fps, frame size, test type, arena dims, code + model versions, measure settings
   video.mp4          # normalised video
   arena.json         # zone polygons (px) + px_per_cm, confirmed flag
   track.parquet      # one row per frame: centroid, area, bbox, axes, orientation, mask RLE, gap flag
@@ -117,15 +117,19 @@ This is the most heavily tested module.
 
 | Metric | Method |
 |---|---|
-| Trajectory | Median filter on centroids. Linear interpolation for gaps ≤ `max_gap` frames; longer gaps become QC flags. |
-| Distance, velocity | Sum of frame-to-frame displacement ÷ `px_per_cm`. Movement below the jitter threshold is zeroed. |
-| Zone time and entries | Point-in-polygon on the centroid, with an optional mask-overlap fraction ≥ threshold (EPM convention). Entries use hysteresis and a minimum dwell so boundary jitter isn't counted. |
-| Thigmotaxis | Fraction of time within d cm of the floor-polygon edge. |
-| Immobility (FST) | Fraction of mask pixels changed between consecutive frames below a threshold, sustained for ≥ the minimum duration. |
+| Trajectory | Linear interpolation across gaps of at most `max_gap_s` with a detection on both sides; longer gaps, and gaps at either end, stay gaps and are listed in `metrics.json` for QC. Then a median filter (`median_window_frames`) on the centroids of each stretch without a gap. |
+| Distance, velocity | Sum of steps between consecutive frames that both have a position, ÷ `px_per_cm`. A kept gap is not bridged. Mean velocity is that distance over the time its steps took. The median filter replaces the earlier idea of zeroing movement below a jitter threshold, so there is one smoothing step, not two. |
+| Zone time and entries | Signed distance of the centroid to the zone edge. Entering takes `zone_hysteresis_cm` inside the edge and leaving takes that far outside; while a visit or absence is shorter than `min_dwell_s`, the shortest flips and merges with its neighbours, so a visit broken by flickers survives and flickers alone vanish. Both guards restart after a kept gap. Entries count moves from outside to inside (across a gap too), so starting in the zone is not an entry. Mask-overlap fraction (EPM convention) comes with the EPM template. |
+| Thigmotaxis | Fraction of frames with a known position within `thigmotaxis_wall_cm` of the floor-polygon edge (or beyond it). |
+| Immobility | Mask change between consecutive frames, 1 − IoU on the stored RLE. A bout is a stretch of changes below `immobility_change_max`; k of them join k + 1 frames, and the bout counts if those frames last at least `immobility_min_s`. |
 | Freezing | Velocity and mask change both below threshold for ≥ the minimum duration. |
 | Rear candidates | Rule-based windows: mask area drop + elongation change + low centroid velocity. These are *candidates* for stage 5, not results. |
 
-Every threshold is a named parameter in a versioned `MeasureConfig` and recorded in the manifest.
+Every threshold is a named parameter in a versioned `MeasureSettings`, recorded in the manifest
+when the run starts, with distances in cm and times in seconds (the filter window is in frames).
+A metric that can't be computed (no position, no mask) is `null`, never zero. `measure/` has its
+own `ruff.toml` that bans I/O, network and model imports, so `scripts/check.sh` enforces its
+purity.
 
 ### 5. Behaviours (judges)
 - Cut 2–4 s clips around each **candidate window** from stage 4, with the mask overlay drawn

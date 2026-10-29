@@ -14,6 +14,7 @@ from .artifacts import (
     ArenaSettings,
     IngestSettings,
     Manifest,
+    MeasureSettings,
     Metrics,
     RunFolder,
 )
@@ -50,6 +51,7 @@ def start_run(
     runs_dir: Path,
     ingest_settings: IngestSettings | None = None,
     arena_settings: ArenaSettings | None = None,
+    measure_settings: MeasureSettings | None = None,
 ) -> RunFolder:
     """Ingest the video into a new run folder and detect the arena, which waits unconfirmed.
     All or nothing: if the video is too short or no floor is found, no run folder is left."""
@@ -68,6 +70,7 @@ def start_run(
                 template=template,
                 ingest=ingest_settings,
                 arena=arena_settings or ArenaSettings(),
+                measure=measure_settings or MeasureSettings(),
                 source=source,
                 video=normalised,
             )
