@@ -29,7 +29,7 @@ def run(run: RunFolder, segmenter: Segmenter) -> None:
 
 def _animal_in(frame: FrameMasks) -> TrackFrame | None:
     """The single animal: the best mask in the frame, or None (a gap) when there is none."""
-    best = best_mask(frame.masks)
+    best = best_mask([m for m in frame.masks if m.pixels.any()])
     shape = mask_shape(best.pixels) if best else None
     if best is None or shape is None:
         return None
