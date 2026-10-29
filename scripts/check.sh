@@ -7,10 +7,7 @@ cd "$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 echo "▶ python: ruff lint";   uv run --locked ruff check .
 echo "▶ python: ruff format"; uv run --locked ruff format --check .
 echo "▶ python: pyright";     uv run --locked pyright
-echo "▶ python: pytest"
-# Exit code 5 means "no tests collected". Remove this allowance when the first test lands
-# (the measure-engine tests, Day 5), so deleted tests can't pass CI silently.
-uv run --locked pytest || [[ $? -eq 5 ]]
+echo "▶ python: pytest";      uv run --locked pytest
 
 # `npm ci` needs the lockfile, so the lockfile marks the frontend as present (CI keys on it too).
 if [[ -f frontend/package-lock.json ]]; then

@@ -24,6 +24,7 @@ cite-or-abstain rule carried over: when data is missing, the system abstains and
 - `docs/ARCHITECTURE.md`: pipeline stages, artifacts, interfaces, open decisions. Read before
   touching a stage boundary or a model call.
 - `docs/application.md`: the hackathon application as submitted. The promises judges will check.
+- `spike/`: the T2 measurement scripts (laptop only). `eval/split.json` is the fixed 6/14 split.
 
 ## Gotchas
 
