@@ -1,0 +1,21 @@
+# Sturman et al. 2020 eval data: videos (2.5 GB) and DLCAnalyzer human labels.
+# The labels are GPL-3.0 and must never be committed into this MIT repo.
+eval/data/
+
+# Pipeline run artifacts (normalised videos, tracks, model response cache)
+runs/
+
+# Secrets
+.env
+.env.*
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# OS
+.DS_Store
