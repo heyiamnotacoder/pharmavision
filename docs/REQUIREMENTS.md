@@ -27,7 +27,7 @@ Hackathon project scoring: **Impact 30%**, **Use of Meta AI tooling 25%**, **Dem
 | FR-4 | Track one animal through the whole video with SAM 3.1 from a text prompt, with no training. Videos over the 15,000-frame request limit are chunked. | ≥ 95% of frames tracked on eval videos (target, to be measured); gaps flagged. | Meta tooling |
 | FR-5 | Compute open-field metrics deterministically: distance, velocity, centre time and entries, thigmotaxis, immobility. | Every metric has unit tests on synthetic trajectories with known answers. | Technical depth |
 | FR-6 | Detect rearing: rule-based candidates, then Muse Spark classifies clips. | Count agreement with human raters reported against human–human agreement (see Eval). | Meta tooling, Impact |
-| FR-7 | QC: deterministic flags plus Muse Spark review of flagged windows. | Every exclusion appears in the report with frame range and reason. | Technical depth |
+| FR-7 | QC: deterministic flags plus Muse Spark review of flagged windows. Verdicts apply automatically; there is no human review queue in the MVP. | Every exclusion and every low-confidence event appears in the report with frame range and reason. | Technical depth |
 | FR-8 | Study-level statistics with a deterministic test-selection rule. | Test choice, effect size, 95% CI and n after exclusions shown; reproduces scipy on fixtures. | Technical depth |
 | FR-9 | Generate an ARRIVE 2.0 Essential-10 methods and results section. | Unknown items appear as `[TO FILL]`; the number audit passes 100%. | Impact, Meta tooling |
 | FR-10 | Results UI: video with mask, trajectory and zone overlay, event timeline, metrics table, report. | Plays a precomputed run smoothly in the demo. | Demo |
@@ -42,6 +42,7 @@ Hackathon project scoring: **Impact 30%**, **Use of Meta AI tooling 25%**, **Dem
 | FR-S3 | Two-animal social interaction test using SAM 3.1 multi-object tracking. |
 | FR-S4 | Batch mode: a folder of videos plus `study.yaml` gives a full study report. |
 | FR-S5 | Export: CSV of metrics, PDF report, and an annotated video. |
+| FR-S6 | Human override of QC verdicts after the fact; an override re-runs the stats. |
 
 ## Non-functional requirements
 
@@ -51,7 +52,7 @@ Hackathon project scoring: **Impact 30%**, **Use of Meta AI tooling 25%**, **Dem
 | NFR-2 | **Reproducible.** The same video, config and model versions give the same metrics. Thresholds are versioned in the manifest and model responses are cached by input hash. |
 | NFR-3 | **Auditable.** Every metric links back to frames. Every exclusion has a reason. Every statistical test records why it was chosen. |
 | NFR-4 | **Budget.** Total Meta Model API spend across development and eval stays within $150. Projected cost per video is logged. |
-| NFR-5 | **Throughput.** A 10-min video completes end to end in a time suitable for the demo (target to be set after the Day 1 spike). The demo uses precomputed runs plus one live run. |
+| NFR-5 | **Throughput.** A 10-min video completes end to end in a time suitable for the demo (target to be set after the spike on Oct 29). The demo uses precomputed runs plus one live run. |
 | NFR-6 | **Type safety.** Pydantic models at every stage boundary. `pyright` strict and `ruff` clean on `measure/` and `stats/`. TypeScript strict on the frontend. |
 | NFR-7 | **Honest framing.** The UI and README say this is a research tool, not validated for regulatory GLP studies. |
 
@@ -62,7 +63,9 @@ Hackathon project scoring: **Impact 30%**, **Use of Meta AI tooling 25%**, **Dem
   mask for immobility).
 - **Contract:** each stage reads fixture artifacts and writes artifacts that validate against their
   Pydantic types. Model calls are replaced by recorded responses.
-- **End to end, few:** one short clip through the whole pipeline with live models, run before each merge to main.
+- **End to end, few:** one short clip through the whole pipeline with live models, run on the laptop
+  (it needs `MODEL_API_KEY`) before merging a PR that changes a model call. CI and cloud sessions
+  use recorded responses.
 - **Eval:** the Sturman harness. It's a measurement, not a pass/fail test, except for the 100%
   number-audit rate.
 
@@ -94,17 +97,27 @@ Hackathon project scoring: **Impact 30%**, **Use of Meta AI tooling 25%**, **Dem
 
 ## Build plan
 
+Re-planned on Oct 29 (Day 4): no code existed yet, so Days 1–3 were folded into the remaining days.
+
 | Day | Date | Work |
 |---|---|---|
-| 1 | Oct 26 | Spike: SAM 3.1 on one Sturman video (arena + track). Settle the open decisions. Repo scaffold. |
-| 2 | Oct 27 | Ingest + arena stage + zone confirmation endpoint. |
-| 3 | Oct 28 | Measure engine: tests first, then implementation. |
-| 4 | Oct 29 | Track stage at full length, gap handling, QC deterministic flags. |
-| 5 | Oct 30 | Rear candidates + Muse Spark clip classifier + cache. |
-| 6 | Oct 31 | QC model review + stats engine (tests first). |
-| 7 | Nov 1 | Report agent + number audit. |
-| 8 | Nov 2 | Eval harness run on the eval split; fix what it reveals. |
-| 9 | Nov 3 | Frontend overlay, timeline, report view; deploy. |
+| 4 | Oct 29 | Repo scaffold + CI. Download one Sturman OFT video. **Spike**: SAM 3.1 arena + track; measure cost and wall-clock time. |
+| 5 | Oct 30 | Ingest, arena and track stages. Measure-engine tests first. |
+| 6 | Oct 31 | Measure engine, rear candidates, deterministic QC flags. |
+| 7 | Nov 1 | Muse Spark clip classifier + cache. Stats engine (tests first). |
+| 8 | Nov 2 | Report agent + number audit. Eval harness on the eval split. |
+| 9 | Nov 3 | Frontend overlay, zone editor, timeline, report view; deploy. |
 | 10 | Nov 4 | Demo video, README, submission (deadline 9:00 PM ET = Nov 5, 7:30 AM IST). |
+
+**Cut order if behind**, first cut first:
+
+1. Muse Spark review of flagged QC windows (deterministic flags still list every exclusion).
+2. SAM 3.1 "hand" / "glove" prompt (the second-large-mask rule still catches hands).
+3. Supported vs unsupported rear (fall back to binary rearing / none).
+
+Build happens in cloud sessions; the spike and the eval run on the laptop, because they call the
+Meta API with the real key and read the Sturman data. One PR per stage or feature, reviewed
+before merge (see `CLAUDE.md`, Workflow). When the design grilling ends, `/to-tickets` turns this
+plan into GitHub issues: one per stage, with blocking links, labelled `ready-for-agent`.
 
 Workshops and office hours run Oct 27 – Nov 4. Take SAM and API questions there early.

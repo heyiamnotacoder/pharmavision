@@ -14,6 +14,25 @@ Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all o
 
 Infer the repo from `git remote -v`; `gh` does this automatically when run inside a clone.
 
+### In cloud sessions (claude.ai/code)
+
+The cloud GitHub proxy rejects GraphQL, so `gh issue …` and `gh pr …` fail there with a 403. Use
+the built-in GitHub tools, or the REST API through `gh api` (no token needed; the proxy
+authenticates). `R=repos/heyiamnotacoder/pharmavision`:
+
+| Operation | REST via `gh api` |
+|---|---|
+| Create an issue | `gh api $R/issues -f title="..." -f body="..." -f 'labels[]=ready-for-agent'` |
+| Read an issue | `gh api $R/issues/<n>` and `gh api $R/issues/<n>/comments` |
+| List issues | `gh api "$R/issues?state=open&labels=<label>&per_page=100"` (PRs also appear; drop items with a `pull_request` key) |
+| Comment | `gh api $R/issues/<n>/comments -f body="..."` |
+| Add / remove a label | `gh api $R/issues/<n>/labels -f 'labels[]=<label>'` / `gh api -X DELETE $R/issues/<n>/labels/<label>` |
+| Close | `gh api -X PATCH $R/issues/<n> -f state=closed` |
+| Open a PR | `gh api $R/pulls -f title="..." -f head=<branch> -f base=main -f body="..."` |
+| Merge a PR | `gh api -X PUT $R/pulls/<n>/merge -f merge_method=squash` |
+
+Sub-issues and blocking links already use REST (see below), so they work unchanged.
+
 ## Pull requests as a triage surface
 
 **PRs as a request surface: no.** _(Set to `yes` if this repo treats external PRs as feature requests; `/triage` reads this flag.)_

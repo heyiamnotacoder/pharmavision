@@ -17,5 +17,9 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 
+# Node (frontend/)
+node_modules/
+dist/
+
 # OS
 .DS_Store
