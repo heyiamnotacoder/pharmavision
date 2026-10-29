@@ -35,7 +35,8 @@ def normalise(source: Path, dest: Path, settings: IngestSettings) -> NormalisedV
         [
             "ffmpeg", "-v", "error", "-y", "-i", str(source),
             "-map", "0:v:0", "-an", "-vf", f"fps={settings.fps},{scale}",
-            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "20",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            "-preset", settings.preset, "-crf", str(settings.crf),
             "-movflags", "+faststart", str(dest),
         ],
         check=True, capture_output=True,

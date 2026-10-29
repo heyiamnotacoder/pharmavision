@@ -6,33 +6,33 @@ from pycocotools import mask as coco_mask
 
 from ..artifacts import RunFolder, Track, TrackFrame
 from ..measure.shape import mask_shape
-from ..segmenter import FrameMasks, Mask, Segmenter
+from ..segmenter import FrameMasks, Segmenter, best_mask
 
 
 def run(run: RunFolder, segmenter: Segmenter) -> None:
     run.confirmed_arena()
     manifest = run.manifest()
     template, n_frames = manifest.template, manifest.video.n_frames
-    found: dict[int, TrackFrame] = {}
+    by_frame_index: dict[int, TrackFrame] = {}
     stream = segmenter.track_video(run.video_path, template.animal_prompt, template.max_animals)
     for frame in stream:
         if not 0 <= frame.frame_index < n_frames:
             raise ValueError(
                 f"{segmenter.model_id} returned frame {frame.frame_index} of {n_frames}"
             )
-        record = _record(frame)
-        if record is not None:
-            found[frame.frame_index] = record
-    frames = [found.get(i) or TrackFrame.gap(i) for i in range(n_frames)]
+        animal = _animal_in(frame)
+        if animal is not None:
+            by_frame_index[frame.frame_index] = animal
+    frames = [by_frame_index.get(i) or TrackFrame.gap(i) for i in range(n_frames)]
     run.write_track(Track(frames=frames))
 
 
-def _record(frame: FrameMasks) -> TrackFrame | None:
-    """The single animal: the highest-confidence non-empty mask, or None (a gap)."""
-    candidates = [(m, s) for m in frame.masks if (s := mask_shape(m.pixels)) is not None]
-    if not candidates:
+def _animal_in(frame: FrameMasks) -> TrackFrame | None:
+    """The single animal: the best mask in the frame, or None (a gap) when there is none."""
+    best = best_mask(frame.masks)
+    shape = mask_shape(best.pixels) if best else None
+    if best is None or shape is None:
         return None
-    best, shape = max(candidates, key=lambda c: _confidence(c[0]))
     return TrackFrame(
         frame_index=frame.frame_index,
         detected=True,
@@ -42,10 +42,6 @@ def _record(frame: FrameMasks) -> TrackFrame | None:
         confidence=best.confidence,
         mask_rle=_rle(best.pixels),
     )
-
-
-def _confidence(mask: Mask) -> float:
-    return mask.confidence if mask.confidence is not None else 0.0
 
 
 def _rle(pixels: NDArray[np.bool_]) -> str:

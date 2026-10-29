@@ -11,6 +11,7 @@ from pathlib import Path
 from .artifacts import (
     Arena,
     ArenaNotConfirmedError,
+    ArenaSettings,
     IngestSettings,
     Manifest,
     Metrics,
@@ -18,11 +19,13 @@ from .artifacts import (
 )
 from .segmenter import Segmenter
 from .stages import arena, ingest, measure, track
+from .stages.arena import ArenaNotFoundError
 from .stages.ingest import VideoTooShortError
 from .templates import TestTemplate
 
 __all__ = [
     "ArenaNotConfirmedError",
+    "ArenaNotFoundError",
     "RunFolder",
     "Stage",
     "VideoTooShortError",
@@ -45,33 +48,35 @@ def start_run(
     template: TestTemplate,
     segmenter: Segmenter,
     runs_dir: Path,
-    settings: IngestSettings | None = None,
+    ingest_settings: IngestSettings | None = None,
+    arena_settings: ArenaSettings | None = None,
 ) -> RunFolder:
     """Ingest the video into a new run folder and detect the arena, which waits unconfirmed.
-    Raises before creating the folder if the video is too short for the protocol."""
-    settings = settings or IngestSettings()
+    All or nothing: if the video is too short or no floor is found, no run folder is left."""
+    ingest_settings = ingest_settings or IngestSettings()
     source = ingest.check_source(video, template)
     created_at = datetime.now(UTC)
     run = RunFolder(runs_dir / f"{created_at:%Y%m%dT%H%M%SZ}-{uuid.uuid4().hex[:6]}")
     run.path.mkdir()
     try:
-        normalised = ingest.normalise(video, run.video_path, settings)
+        normalised = ingest.normalise(video, run.video_path, ingest_settings)
         run.write_manifest(
             Manifest(
                 run_id=run.run_id,
                 created_at=created_at,
                 code_version=version("pharmavision"),
                 template=template,
-                ingest=settings,
+                ingest=ingest_settings,
+                arena=arena_settings or ArenaSettings(),
                 source=source,
                 video=normalised,
             )
         )
+        run.write_arena(arena.detect(run, segmenter))
+        _record_model(run, "arena", segmenter)
     except BaseException:
         shutil.rmtree(run.path)
         raise
-    run.write_arena(arena.detect(run, segmenter))
-    _record_model(run, "arena", segmenter)
     return run
 
 

@@ -1,6 +1,6 @@
 """The single boundary to the "sees" layer: pixels in, masks out. Geometry only."""
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -24,6 +24,16 @@ class FrameMasks:
 
     frame_index: int
     masks: tuple[Mask, ...]
+
+
+def best_mask(masks: Sequence[Mask]) -> Mask | None:
+    """The most confident mask, larger first on a tie; None when there are none. A single
+    animal or a single floor is the top instance, as SAM 3.1 may return several."""
+    return max(
+        masks,
+        key=lambda m: (m.confidence if m.confidence is not None else 0.0, int(m.pixels.sum())),
+        default=None,
+    )
 
 
 class Segmenter(Protocol):

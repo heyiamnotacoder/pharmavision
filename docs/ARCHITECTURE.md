@@ -94,9 +94,14 @@ video format both SAM 3.1 and Muse Spark accept.
 
 ```python
 class Segmenter(Protocol):
-    def segment_image(self, frame: Frame, prompt: str) -> list[Mask]: ...
+    model_id: str  # recorded in the manifest per stage
+
+    def segment_image(self, image: NDArray[np.uint8], prompt: str) -> list[Mask]: ...
     def track_video(self, video: Path, prompt: str, max_objects: int) -> Iterator[FrameMasks]: ...
 ```
+
+`SyntheticSegmenter` stands in for SAM 3.1 in tests: it draws a scripted floor and trajectory,
+and can skip frames or deliver them out of order like the real stream.
 
 - `MetaApiSegmenter`: **primary**. The Model API supports SAM 3.1 video tracking.
 - `SelfHostedSegmenter`: fallback only, if API price or latency rules it out. Uses open weights

@@ -39,8 +39,19 @@ class NormalisedVideo(VideoInfo):
 
 class IngestSettings(Artifact):
     fps: int = 15
-    """SAM 3.1 takes at most 15,000 frames per request; at 15 fps a 10-min trial is 9,000."""
+    """SAM 3.1 takes at most 15,000 frames per request; at 15 fps a 10-min video is 9,000."""
     max_side_px: int = 1280
+    """Downscale (never upscale) so the longer side fits."""
+    crf: int = 20
+    """x264 quality: low enough loss that masks on the normalised video match the source."""
+    preset: str = "veryfast"
+
+
+class ArenaSettings(Artifact):
+    background_samples: int = 25
+    """Frames sampled for the per-pixel median background."""
+    outline_tolerance: float = 0.01
+    """Floor outline simplification, as a fraction of its perimeter."""
 
 
 class Manifest(Artifact):
@@ -49,6 +60,7 @@ class Manifest(Artifact):
     code_version: str
     template: TestTemplate
     ingest: IngestSettings
+    arena: ArenaSettings
     source: SourceVideo
     video: NormalisedVideo
     models: dict[str, str] = {}

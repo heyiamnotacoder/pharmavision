@@ -12,6 +12,7 @@ from shapely.geometry import Polygon
 
 from pharmavision.pipeline import (
     ArenaNotConfirmedError,
+    ArenaNotFoundError,
     Stage,
     VideoTooShortError,
     confirm_arena,
@@ -22,7 +23,7 @@ from pharmavision.pipeline import (
 from pharmavision.segmenter.synthetic import SyntheticSegmenter
 from pharmavision.templates import OPEN_FIELD
 
-from .conftest import make_video
+from .videos import make_video
 
 TEMPLATE = OPEN_FIELD.model_copy(update={"protocol_duration_s": 3.0})
 
@@ -55,6 +56,26 @@ def test_rejects_a_video_shorter_than_the_protocol(tmp_path: Path, runs_dir: Pat
 
     with pytest.raises(VideoTooShortError):
         start_run(video, TEMPLATE, SyntheticSegmenter(), runs_dir)
+
+    assert list(runs_dir.iterdir()) == []
+
+
+def test_accepts_a_video_short_of_the_protocol_by_container_rounding(
+    tmp_path: Path, runs_dir: Path
+) -> None:
+    # A 10-min recording can probe as 599.96 s; the template tolerates up to 0.5 s.
+    video = make_video(tmp_path / "rounded.mp4", seconds=2.6)
+
+    run = start_run(video, TEMPLATE, SyntheticSegmenter(floor=FLOOR), runs_dir)
+
+    assert run.manifest().source.duration_s == pytest.approx(2.6, abs=0.1)
+
+
+def test_a_floor_never_found_leaves_no_run_folder(tmp_path: Path, runs_dir: Path) -> None:
+    video = make_video(tmp_path / "trial.mp4", seconds=4)
+
+    with pytest.raises(ArenaNotFoundError):
+        start_run(video, TEMPLATE, SyntheticSegmenter(floor=[]), runs_dir)
 
     assert list(runs_dir.iterdir()) == []
 
