@@ -27,7 +27,7 @@ class TestTemplate(BaseModel):
 # central 50% of the floor.
 OPEN_FIELD = TestTemplate(
     test_type="open_field",
-    floor_prompt="arena floor",
+    floor_prompt="square floor",  # "arena floor" finds nothing on Sturman videos (T2 spike)
     animal_prompt="mouse",
     max_animals=1,
     arena_width_cm=45.0,

@@ -51,7 +51,8 @@ video format both SAM 3.1 and Muse Spark accept.
 ### 2. Arena (sees, with human confirmation)
 - Take a **background frame**: the per-pixel median over sampled frames, so the animal disappears.
 - SAM 3.1 image segmentation with **text prompts from the test template**:
-  - open field: "arena floor"
+  - open field: "square floor" ("arena floor", "floor", "box" and "open field arena" found
+    nothing on the Sturman background frame in the spike, Oct 30)
   - elevated plus maze: "open arm", "closed arm", "center square"
   - forced swim: "water cylinder"
   SAM 3.1 takes **one concept per request**, so each zone prompt is a separate call.
@@ -59,6 +60,9 @@ video format both SAM 3.1 and Muse Spark accept.
   floor polygon **by area** (the floor shrunk about its centroid), computed in Python. The open
   field template uses 50%, as Sturman et al. 2020 did (45 × 45 cm arena, 10 min).
 - Calibration: `px_per_cm` comes from the floor polygon and the arena's real dimensions in the template.
+  The Sturman camera has a wide-angle lens and a tilted view: the square floor spans 387 × 313 px,
+  so calibrate x and y separately (or fit a 4-corner homography), not with one `px_per_cm`
+  (found in the spike, Oct 30).
 - **The UI shows the zones and the user confirms or drags vertices.** Nothing downstream runs until
   `arena.json.confirmed == true`. This is the one human-in-the-loop gate. It is cheap and removes
   the largest source of systematic error.
@@ -218,23 +222,48 @@ the demo and write-up, the same way PaedScale published its validation table.
   $1.25 input / $4.25 output per million tokens. `muse-wonder-1.0` (preview) about $4 / $20, so
   only consider it for the report step. **SAM 3.1 pricing was not found online**; measure it in the spike (Oct 29).
 - The **Contributor tier** (`muse-spark-1.3-contributor`, about $0.10 / $0.20) lets Meta train on
-  prompts and outputs, with lower rate limits (reported 100 RPM vs 3,000 RPM). It's acceptable for
+  prompts and outputs, with lower rate limits (150 RPM vs 3,000 RPM, Meta's pricing page, Oct 30). It's acceptable for
   the public-dataset eval only, never for a lab's own videos. **Decided:** use it for the Sturman
   eval and for development on Sturman clips; the tier is a config value, standard tier otherwise.
 
 ## Open decisions (settle in the spike, Oct 29)
 
-1. **SAM 3.1 cost and latency.** Video tracking on the API is confirmed. Still unknown: price, and
-   wall-clock time for a 9,000-frame video. Measure one Sturman video end to end. **Rule:** stay on
-   the API at ≤ $3.30 per 10-min video (about 30 videos ≈ $100); above that, self-host on Modal or
-   process fewer eval videos. Wall-clock time doesn't rule the API out: the demo uses precomputed
-   runs plus one short live clip.
+1. **SAM 3.1 cost and latency. Measured Oct 30; decided: stay on the API.** One Sturman video
+   (OFT_16, 609 s) through `python -m spike.sam_run`, ingested at 15 fps:
+
+   | Measure | Result |
+   |---|---|
+   | Frames billed (`usage.video_frames_processed`) | 9,142, exactly the frames sent |
+   | Cost | $1.83 for the video (+ $0.0025 for the arena image) = **$1.80 per 10 min**, under $3.30 |
+   | Wall-clock | upload 20 s, first frame 3.5 s, whole track 328 s (about 1.9× faster than real time) |
+   | Track "mouse" | mask on 9,062 / 9,142 frames (99.1%), always one object id, never two masks, frames arrived in order this time, mean confidence 0.71, masks box-local (about 99 × 86 px) |
+   | Arena "square floor" | one mask, confidence 0.66; "arena floor" returned an empty stream |
+
+   Prices: $0.20 per 1,000 video frames, $2.50 per 1,000 images, at least 50 frames billed per
+   video request. At the native 25 fps a Sturman video is 15,234 frames, over the 15,000-frame
+   limit, which confirms ingest at 15 fps. The full eval (20 videos) costs about $37. The raw
+   responses are committed as replayable fixtures for T4 (`tests/fixtures/sam/`, track 3.7 MB,
+   plus the arena and an empty "no match" stream). **Rule:** stay on the API at ≤ $3.30 per
+   10-min video; above that, self-host on Modal or process fewer eval videos.
 2. **Rearing from a top-down camera.** The Sturman videos are confirmed top view, so rearing shows
    up only as mask shrink and elongation change. Measure how well the rule-based candidates find
    human-labelled rears before building stage 5 on them.
-3. **Muse Spark on short clips.** Can it tell supported from unsupported rears at 15 fps in 2–4 s
-   clips? Run 20 labelled clips before committing to the label set. Fall back to a binary
-   rearing/none if needed.
+3. **Muse Spark on short clips. Measured Oct 30; label set decided: binary rearing / none.**
+   `python -m spike.muse_clips [fps]` asked `muse-spark-1.3-contributor` (zero-shot, whole-frame
+   928×576 clips, no mask overlay) about 20 train-split clips: 8 supported and 8 unsupported rears
+   that at least two raters agree on (time IoU ≥ 0.5), plus 4 windows with no rear as a control.
+
+   | `input_video` sampling | Tokens / clip | 3-way acc (κ) | Supported vs unsupported, true rears (κ) | Rear vs none (κ) | Cost |
+   |---|---|---|---|---|---|
+   | default | 731 | 0.40 (0.13) | 0.38 (0.13), n = 16 | 0.55 (0.04) | $0.008 |
+   | `fps: 15` | 5,170 | 0.50 (0.25) | 0.50 (0.24), n = 16 | 0.65 (0.15) | $0.016 |
+
+   **Rule:** keep the supported/unsupported split only if κ on the true rears is ≥ 0.4. It is 0.24,
+   so the label set is binary. Even rear vs none is near chance, so **zero-shot Muse Spark on whole
+   frames cannot carry rear detection**: the mouse fills about 2% of the frame. Stage 5 (T5b) must
+   send clips cropped to the SAM mask, with the overlay drawn in, at `fps: 15`, with few-shot
+   examples from the train split, and re-measure on the same 20 clips before trusting model
+   labels. The rule-based rear candidates from stage 4 (open decision 2) carry more weight.
 4. **Frontend stack. Decided Oct 29:** Vite + React + TypeScript (strict), because the overlay and
    zone editor are the demo.
 5. **Python environment. Decided Oct 29:** `uv`, Python 3.12, `ruff` everywhere, `pyright` strict on
@@ -250,4 +279,7 @@ the demo and write-up, the same way PaedScale published its validation table.
 | `meta-sam-parser` 0.1.0 on PyPI, Python ≥ 3.10, SAM License (publications must acknowledge SAM). | [PyPI](https://pypi.org/project/meta-sam-parser/), [client libraries](https://dev.meta.ai/docs/sam/client-libraries.md) |
 | Files API: 1 GiB per upload, 50 MB inline, 100 GiB per team, no expiry by default. Muse Spark video input is MP4 only. | [File handling](https://dev.meta.ai/docs/file-handling.md), [Video understanding](https://dev.meta.ai/docs/video-understanding.md) |
 | Sturman videos: CC BY 4.0, top view, 2.5 GB; labels as in the eval table above. | [Zenodo 3608658](https://zenodo.org/records/3608658), [DLCAnalyzer](https://github.com/ETHZ-INS/DLCAnalyzer) |
-| Not found online: SAM 3.1 pricing, Muse Spark video duration limit, frame sampling rate for video understanding. | Measure in the spike (Oct 29) |
+| SAM 3.1: $0.20 per 1,000 video frames, $2.50 per 1,000 images, 50-frame minimum per video request. Muse Spark 1.3: $1.25 / $4.25 per M tokens; contributor $0.10 / $0.20, 150 RPM. Usage reports `video_frames_processed` and `images_processed`. (Checked Oct 30.) | [Pricing and rate limits](https://dev.meta.ai/docs/pricing-rate-limits.md), [Responses schemas](https://dev.meta.ai/docs/api-reference/responses/schemas.md) |
+| `input_video` takes `video_url` (public or base64 data URL) or `file_id`, plus an optional `fps`. Structured output is `text.format` with `type: "json_schema"`. (Checked Oct 30.) | [Responses schemas](https://dev.meta.ai/docs/api-reference/responses/schemas.md) |
+| Sturman open-field videos: 928×576, 25 fps, about 609 s (15,234 frames), wide-angle lens, burned-in timestamp. (Checked Oct 30.) | `ffprobe` on the downloaded files |
+| Muse Spark video tokens, measured: a 2–4 s 928×576 clip costs about 731 input tokens at the default sampling and 5,170 with `fps: 15`. Not found online: a video duration limit. | `spike.muse_clips`, Oct 30 |
