@@ -56,7 +56,8 @@ video format both SAM 3.1 and Muse Spark accept.
   - forced swim: "water cylinder"
   SAM 3.1 takes **one concept per request**, so each zone prompt is a separate call.
 - **Derived zones are geometry, not prompts.** The open-field centre zone is the inner X% of the
-  floor polygon, computed in Python.
+  floor polygon **by area** (the floor shrunk about its centroid), computed in Python. The open
+  field template uses 50%, as Sturman et al. 2020 did (45 × 45 cm arena, 10 min).
 - Calibration: `px_per_cm` comes from the floor polygon and the arena's real dimensions in the template.
 - **The UI shows the zones and the user confirms or drags vertices.** Nothing downstream runs until
   `arena.json.confirmed == true`. This is the one human-in-the-loop gate. It is cheap and removes
