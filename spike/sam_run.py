@@ -45,6 +45,8 @@ FIXTURE_LIMIT_BYTES = 5_000_000
 TRIM_FRAMES = 300  # frames 0-299 (20 s at 15 fps) when the full recording is too big to commit
 DELTA = "response.output_text.delta"
 FRAME_MARKER = re.compile(r"<(\d+)f>")
+# "arena floor", "floor", "box" and "open field arena" return no mask on Sturman OFT (Oct 30)
+ARENA_PROMPT = "square floor"
 
 
 def background_frame(video: Path, dest: Path, samples: int = 60) -> None:
@@ -207,7 +209,7 @@ async def main(video_id: str) -> None:
         f"{video_id}_arena",
         model="sam-3.1",
         input=message(
-            {"type": "input_text", "text": "arena floor"},
+            {"type": "input_text", "text": ARENA_PROMPT},
             {"type": "input_image", "image_url": f"data:image/png;base64,{png}"},
         ),
         metadata={"include_confidence": "true"},

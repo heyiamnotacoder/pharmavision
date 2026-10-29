@@ -1,7 +1,7 @@
 """Ask Muse Spark to label ~20 labelled train-split clips and score it against the raters
 (laptop only). Answers open decision 3: can it tell supported from unsupported rears?
 
-Usage: uv run python -m spike.muse_clips
+Usage: uv run python -m spike.muse_clips [fps]   (fps: optional input_video sampling rate)
 
 Clips are 2-4 s, 15 fps H.264, cut around consensus rears (≥ 2 raters agree) plus no-rear
 windows as a control. Responses are cached by (model, prompt version, clip hash), so re-runs
@@ -11,6 +11,7 @@ are free. Needs MODEL_API_KEY in .env and `python -m spike.data` first.
 import base64
 import json
 import subprocess
+import sys
 import time
 from dataclasses import asdict
 from pathlib import Path
@@ -73,9 +74,9 @@ def cut(clip: Clip) -> Path:
     return encode(VIDEOS / f"{clip.video_id}.mp4", dest, clip.start, clip.end)
 
 
-def ask(client: OpenAI, clip_path: Path) -> dict[str, Any]:
+def ask(client: OpenAI, clip_path: Path, fps: int | None) -> dict[str, Any]:
     data = clip_path.read_bytes()
-    key = input_hash(MODEL, PROMPT_VERSION, data)
+    key = input_hash(MODEL, PROMPT_VERSION, str(fps), data)
     cached = OUT / "cache" / f"{key}.json"
     if cached.exists():
         return json.loads(cached.read_text())
@@ -85,7 +86,8 @@ def ask(client: OpenAI, clip_path: Path) -> dict[str, Any]:
         "model": MODEL,
         "input": message(
             {"type": "input_text", "text": PROMPT},
-            {"type": "input_video", "video_url": video_url},
+            {"type": "input_video", "video_url": video_url}
+            | ({"fps": fps} if fps is not None else {}),
         ),
         "text": {"format": FORMAT},
     }
@@ -111,7 +113,7 @@ def cost_usd(usage: dict[str, Any] | None) -> float:
     ) / 1e6
 
 
-def main() -> None:
+def main(fps: int | None) -> None:
     client = OpenAI(base_url=BASE_URL, api_key=api_key())
     train: list[str] = json.loads(SPLIT.read_text())["train"]
     video_s = min(duration_s(VIDEOS / f"{v}.mp4") for v in train)
@@ -119,7 +121,7 @@ def main() -> None:
 
     rows: list[dict[str, Any]] = []
     for clip in clips:
-        answer = ask(client, cut(clip))
+        answer = ask(client, cut(clip), fps)
         rows.append(asdict(clip) | {"predicted": TO_TRUTH[answer["output"]["label"]]} | answer)
         print(f"{clip.video_id} {clip.start:8.3f} {clip.truth:12} → {rows[-1]['predicted']}")
 
@@ -138,6 +140,7 @@ def main() -> None:
     summary = {
         "model": MODEL,
         "prompt_version": PROMPT_VERSION,
+        "input_fps": fps,
         "clips": len(rows),
         "scores": {name: asdict(score) for name, score in scores.items()},
         "label_set": "three_way"
@@ -149,9 +152,11 @@ def main() -> None:
         / len(rows),
         "rows": rows,
     }
-    (OUT / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+    (OUT / f"summary-{PROMPT_VERSION}-fps{fps or 'default'}.json").write_text(
+        json.dumps(summary, indent=2) + "\n"
+    )
     print(json.dumps({k: v for k, v in summary.items() if k != "rows"}, indent=2))
 
 
 if __name__ == "__main__":
-    main()
+    main(int(sys.argv[1]) if len(sys.argv) > 1 else None)
