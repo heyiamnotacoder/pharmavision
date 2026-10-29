@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: lint · typecheck · test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Python 3.12
+        run: uv python install 3.12
+
+      - name: Install Python dependencies
+        run: uv sync --locked
+
+      - name: Detect frontend
+        id: frontend
+        run: echo "present=$([[ -f frontend/package.json ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v4
+        if: steps.frontend.outputs.present == 'true'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # One source of truth: CI runs the same gates as `scripts/check.sh` on the laptop or in a
+      # cloud session.
+      - name: Lint, format, typecheck, test
+        run: scripts/check.sh

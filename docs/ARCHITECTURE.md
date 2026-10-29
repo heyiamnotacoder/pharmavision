@@ -133,6 +133,9 @@ Every threshold is a named parameter in a versioned `MeasureConfig` and recorded
   on flagged windows.
 - Muse Spark reviews only the flagged windows and returns `{verdict: exclude_window | keep | exclude_trial, reason}`.
 - Every exclusion is listed in the report. Nothing is dropped silently.
+- Verdicts apply automatically. Zone confirmation stays the only human gate; low-confidence events
+  are reported as such rather than queued for review. A human override after the fact is stretch
+  goal FR-S6.
 
 ### 7. Stats (measures)
 - Input: per-animal metrics × `study.yaml` groups.
@@ -183,7 +186,8 @@ Every threshold is a named parameter in a versioned `MeasureConfig` and recorded
 | Head dips (EPM, stretch) | 3 raters, 5 videos | Count agreement | Report only, n is too small for a claim |
 | Report | Computed tables | Number-audit pass rate | 100% |
 
-Use a fixed train/eval split of the videos, recorded in `eval/split.json`. Few-shot examples come
+Use a fixed train/eval split of the 20 open-field videos, **6 train / 14 eval**, drawn at random
+with a fixed seed and recorded in `eval/split.json`. Few-shot examples come
 only from the train split. The eval report is generated as `eval/REPORT.md` and its numbers feed
 the demo and write-up, the same way PaedScale published its validation table.
 
@@ -209,23 +213,26 @@ the demo and write-up, the same way PaedScale published its validation table.
   only consider it for the report step. **SAM 3.1 pricing was not found online**; measure it on Day 1.
 - The **Contributor tier** (`muse-spark-1.3-contributor`, about $0.10 / $0.20) lets Meta train on
   prompts and outputs, with lower rate limits (reported 100 RPM vs 3,000 RPM). It's acceptable for
-  the public-dataset eval only, never for a lab's own videos.
+  the public-dataset eval only, never for a lab's own videos. **Decided:** use it for the Sturman
+  eval and for development on Sturman clips; the tier is a config value, standard tier otherwise.
 
 ## Open decisions (settle in the Day 1 spike)
 
 1. **SAM 3.1 cost and latency.** Video tracking on the API is confirmed. Still unknown: price, and
-   wall-clock time for a 9,000-frame video. Measure one Sturman video end to end. Self-host only if
-   either rules the API out.
+   wall-clock time for a 9,000-frame video. Measure one Sturman video end to end. **Rule:** stay on
+   the API at ≤ $3.30 per 10-min video (about 30 videos ≈ $100); above that, self-host on Modal or
+   process fewer eval videos. Wall-clock time doesn't rule the API out: the demo uses precomputed
+   runs plus one short live clip.
 2. **Rearing from a top-down camera.** The Sturman videos are confirmed top view, so rearing shows
    up only as mask shrink and elongation change. Measure how well the rule-based candidates find
    human-labelled rears before building stage 5 on them.
 3. **Muse Spark on short clips.** Can it tell supported from unsupported rears at 15 fps in 2–4 s
    clips? Run 20 labelled clips before committing to the label set. Fall back to a binary
    rearing/none if needed.
-4. **Frontend stack.** Vite + React + TypeScript (typed, better zone-editor ergonomics) vs a single
-   HTML file like PaedScale (faster to ship). Leaning React + TS because the overlay and editor are
-   the demo.
-5. **Python environment.** `uv`, Python 3.12, `ruff` + `pyright` strict on `measure/` and `stats/`.
+4. **Frontend stack. Decided Oct 29:** Vite + React + TypeScript (strict), because the overlay and
+   zone editor are the demo.
+5. **Python environment. Decided Oct 29:** `uv`, Python 3.12, `ruff` everywhere, `pyright` strict on
+   `measure/` and `stats/`.
 
 ## Verified facts (Oct 21, 2026)
 
