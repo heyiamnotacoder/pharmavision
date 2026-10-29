@@ -36,7 +36,7 @@ def main() -> None:
         metrics = finish_run(run, segmenter)
         frames = run.track().frames
         tracked = sum(f.detected for f in frames)
-        print(f"tracked {tracked}/{len(frames)} frames ({tracked / len(frames):.1%})")
+        print(f"tracked {tracked}/{len(frames)} frames")
         print(metrics.model_dump_json(indent=2))
 
 

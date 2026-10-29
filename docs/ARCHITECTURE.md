@@ -115,7 +115,8 @@ and can skip frames or deliver them out of order like the real stream.
   It keeps the `max_objects` most confident instances per frame. Videos over
   `max_frames_per_request` go in chunks overlapping by `chunk_overlap_frames` (150), each cut
   frame-exact with ffmpeg and uploaded on its own; a chunk's objects take the previous chunk's
-  ids by mean mask IoU ≥ 0.5 over the overlap, and the overlap is handed over at its middle.
+  ids by mask IoU ≥ 0.5, averaged over the overlap frames where either object appears, and the
+  overlap is handed over at its middle. Frame counts are exact (ffprobe packet count).
   The cache key is the video's hash, the frame span, the prompt and the request metadata, so a
   cached re-run uploads nothing and needs no API key. Cost: `meta-sam-parser` is pure Python,
   about 15 ms per frame to parse and as much again to decode, so a 9,000-frame video takes

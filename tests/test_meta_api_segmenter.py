@@ -1,7 +1,7 @@
 """The SAM 3.1 backend at the Segmenter interface, for what the track artifact can't show:
 object identity across the overlapping chunks of a video over the frame limit."""
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import numpy as np
@@ -10,7 +10,15 @@ import pytest
 from pharmavision.segmenter import Mask
 from pharmavision.segmenter.meta_api import MetaApiSegmenter, MetaApiSettings, SamResponseError
 
-from .sam_replay import Event, Instance, ReplayTransport, disc, frame_line, responses_events
+from .sam_replay import (
+    Event,
+    Instance,
+    ReplayTransport,
+    disc,
+    frame_line,
+    output_text,
+    responses_events,
+)
 from .videos import make_video
 
 SHAPE = (360, 360)
@@ -21,21 +29,24 @@ def walk(frame: int) -> tuple[float, float]:
     return (100.0 + 2 * frame, 90.0 + 2 * frame)
 
 
+def animal(frame: int, object_id: str = "0") -> Instance:
+    return Instance(object_id, disc(SHAPE, walk(frame), 8), 0.71)
+
+
 def chunk_stream(start: int, end: int, animal_id: str, decoy_id: str) -> list[Event]:
     """SAM 3.1's answer for frames start..end-1 cut out as their own video: markers count from
     0, and object ids are whatever this response chose."""
+    decoy = Instance(decoy_id, disc(SHAPE, DECOY_AT, 14), 0.35)
     return responses_events(
         [
-            frame_line(
-                frame - start,
-                [
-                    Instance(animal_id, disc(SHAPE, walk(frame), 8), 0.71),
-                    Instance(decoy_id, disc(SHAPE, DECOY_AT, 14), 0.35),
-                ],
-            )
+            frame_line(frame - start, [animal(frame, animal_id), decoy])
             for frame in range(start, end)
         ]
     )
+
+
+def output_lines(events: list[Event]) -> list[str]:
+    return output_text(events).splitlines(keepends=True)
 
 
 def centroid(mask: Mask) -> tuple[float, float]:
@@ -94,16 +105,27 @@ def test_a_single_animal_keeps_only_the_most_confident_instance(tmp_path: Path) 
         assert centroid(frame.masks[0]) == pytest.approx(walk(frame.frame_index), abs=0.01)
 
 
-def test_a_truncated_response_raises_and_is_not_cached(tmp_path: Path) -> None:
-    image = np.zeros((*SHAPE, 3), dtype=np.uint8)
-    whole = responses_events([frame_line(0, [Instance("0", disc(SHAPE, (180.0, 180.0), 50), 0.6)])])
-    truncated = [e for e in whole if e["type"] != "response.completed"]
-    transport = ReplayTransport([truncated, whole])
+def truncated(events: list[Event]) -> list[Event]:
+    return [e for e in events if e["type"] != "response.completed"]
+
+
+def past_the_end(events: list[Event]) -> list[Event]:
+    """The stream plus one frame beyond the video's last."""
+    return responses_events([*output_lines(events), frame_line(50, [animal(50)])])
+
+
+@pytest.mark.parametrize("spoil", [truncated, past_the_end])
+def test_a_bad_response_raises_and_is_not_cached(
+    spoil: Callable[[list[Event]], list[Event]], tmp_path: Path
+) -> None:
+    video = make_video(tmp_path / "trial.mp4", seconds=2)  # 50 frames at 25 fps
+    good = chunk_stream(0, 50, animal_id="0", decoy_id="1")
+    transport = ReplayTransport([spoil(good), good])
     sam = MetaApiSegmenter(MetaApiSettings(cache_dir=tmp_path / "cache"), transport)
 
     with pytest.raises(SamResponseError):
-        sam.segment_image(image, "square floor")
-    masks = sam.segment_image(image, "square floor")
+        list(sam.track_video(video, "mouse", max_objects=1))
+    frames = list(sam.track_video(video, "mouse", max_objects=1))
 
     assert len(transport.requests) == 2
-    assert [m.confidence for m in masks] == [pytest.approx(0.6)]
+    assert [f.frame_index for f in frames] == list(range(50))

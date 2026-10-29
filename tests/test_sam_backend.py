@@ -91,16 +91,11 @@ def arena_stream() -> list[Event]:
     return responses_events([frame_line(0, [Instance("0", polygon(SHAPE, FLOOR), 0.66)])])
 
 
-def track_stream(frames: Iterable[int], decoy: bool = False) -> list[Event]:
-    """The animal at `walk(frame)` in each listed frame, in the order listed; with `decoy`, a
-    larger, less confident second object in a far corner of every frame."""
-    lines = []
-    for frame in frames:
-        instances = [Instance("0", disc(SHAPE, walk(frame), 8), 0.71)]
-        if decoy:
-            instances.append(Instance("1", disc(SHAPE, (300.0, 60.0), 14), 0.35))
-        lines.append(frame_line(frame, instances))
-    return responses_events(lines)
+def track_stream(frames: Iterable[int]) -> list[Event]:
+    """The animal at `walk(frame)` in each listed frame, in the order listed."""
+    return responses_events(
+        [frame_line(frame, [Instance("0", disc(SHAPE, walk(frame), 8), 0.71)]) for frame in frames]
+    )
 
 
 def tracked(tmp_path: Path, runs_dir: Path, sam: Segmenter) -> Track:
@@ -137,18 +132,6 @@ def test_an_empty_stream_means_animal_not_found_and_gives_gaps(
 
     assert len(track.frames) == N_FRAMES
     assert not any(f.detected for f in track.frames)
-
-
-def test_a_single_animal_is_the_most_confident_instance_in_each_frame(
-    tmp_path: Path, runs_dir: Path
-) -> None:
-    transport = ReplayTransport([arena_stream(), track_stream(range(N_FRAMES), decoy=True)])
-
-    track = tracked(tmp_path, runs_dir, segmenter(tmp_path / "cache", transport))
-
-    for frame in track.frames:
-        assert frame.confidence == pytest.approx(0.71)
-        assert frame.position == pytest.approx(walk(frame.frame_index), abs=0.01)
 
 
 def test_a_rerun_is_served_from_the_cache_without_calling_the_api(

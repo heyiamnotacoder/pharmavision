@@ -30,16 +30,22 @@ def handover_frame(previous: range, current: range) -> int:
 
 
 def relink(previous: ObjectMasks, current: ObjectMasks, min_iou: float) -> dict[str, str]:
-    """Map each object id in `current` to the `previous` id it overlaps best, by mean mask IoU
-    over the frames where both appear. Pairs are taken greedily, best first, and only at
-    `min_iou` or above; an object with no partner is absent from the map."""
-    totals: dict[tuple[str, str], list[float]] = {}
+    """Map each object id in `current` to the `previous` id it overlaps best, by mask IoU
+    averaged over the frames where either appears (a frame with only one of them counts as 0,
+    so a brief coincidence can't outscore a pair seen together throughout). Pairs are taken
+    greedily, best first, and only at `min_iou` or above; an object with no partner is absent
+    from the map."""
+    old_frames, new_frames = _frames_of(previous), _frames_of(current)
+    totals: dict[tuple[str, str], float] = {}
     for frame, current_objects in current.items():
         for old_id, old in previous.get(frame, {}).items():
             for new_id, new in current_objects.items():
-                totals.setdefault((old_id, new_id), []).append(_iou(old, new))
+                totals[old_id, new_id] = totals.get((old_id, new_id), 0.0) + _iou(old, new)
     scores = sorted(
-        ((float(np.mean(ious)), old_id, new_id) for (old_id, new_id), ious in totals.items()),
+        (
+            (total / len(old_frames[old_id] | new_frames[new_id]), old_id, new_id)
+            for (old_id, new_id), total in totals.items()
+        ),
         reverse=True,
     )
     linked: dict[str, str] = {}
@@ -47,6 +53,15 @@ def relink(previous: ObjectMasks, current: ObjectMasks, min_iou: float) -> dict[
         if score >= min_iou and new_id not in linked and old_id not in linked.values():
             linked[new_id] = old_id
     return linked
+
+
+def _frames_of(masks: ObjectMasks) -> dict[str, set[int]]:
+    """The frames each object appears in."""
+    frames: dict[str, set[int]] = {}
+    for frame, objects in masks.items():
+        for object_id in objects:
+            frames.setdefault(object_id, set()).add(frame)
+    return frames
 
 
 def _iou(a: NDArray[np.bool_], b: NDArray[np.bool_]) -> float:

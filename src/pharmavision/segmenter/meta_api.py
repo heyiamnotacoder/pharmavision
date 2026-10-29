@@ -1,11 +1,13 @@
 """SAM 3.1 on the Meta Model API: the primary Segmenter backend.
 
-One request per image or video: the video is uploaded once through the Files API, then the
-Responses API streams one `<Nf>` line per frame, which `meta-sam-parser` turns into box-local
-masks. Records are keyed by that frame index, never by line position."""
+One request per image or video (per chunk, for a video over the frame limit): the video is
+uploaded once through the Files API, then the Responses API streams one `<Nf>` line per frame,
+which `meta-sam-parser` turns into box-local masks. Records are keyed by that frame index, never
+by line position."""
 
 import asyncio
 import base64
+import json
 import os
 import subprocess
 import tempfile
@@ -29,7 +31,7 @@ from meta_sam_parser import (
 from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from ..model_cache import ResponseCache, file_sha256, input_hash
+from ..model_cache import Event, ResponseCache, file_sha256, input_hash
 from . import FrameMasks, Mask
 from .chunks import handover_frame, plan_chunks, relink
 
@@ -37,7 +39,6 @@ PROMPT_VERSION = "sam-v1"
 """The request shape (prompt wording aside, which is hashed): bump it when the request changes."""
 
 Request = Mapping[str, Any]
-Event = Mapping[str, object]
 
 
 class SamResponseError(RuntimeError):
@@ -141,11 +142,11 @@ class MetaApiSegmenter:
         chunks = plan_chunks(
             n_frames, settings.max_frames_per_request, settings.chunk_overlap_frames
         )
-        for number, chunk in enumerate(chunks):
+        for chunk_number, chunk in enumerate(chunks):
             found = self._track_chunk(video, video_sha, n_frames, chunk, prompt)
             sam_ids = {sam_id for objects in found.values() for sam_id in objects}
             if previous_chunk is None:
-                ids, first = {sam_id: sam_id for sam_id in sam_ids}, 0
+                ids, handover = {sam_id: sam_id for sam_id in sam_ids}, 0
             else:
                 overlap = range(chunk.start, previous_chunk.stop)
                 linked = relink(
@@ -153,14 +154,15 @@ class MetaApiSegmenter:
                     _decoded(found, overlap, shape),
                     settings.relink_min_iou,
                 )
-                ids = {sam_id: linked.get(sam_id, f"{number}.{sam_id}") for sam_id in sam_ids}
-                first = handover_frame(previous_chunk, chunk)
+                # An object new in this chunk gets an id no SAM response uses: "<chunk>.<id>".
+                ids = {sam_id: linked.get(sam_id, f"{chunk_number}.{sam_id}") for sam_id in sam_ids}
+                handover = handover_frame(previous_chunk, chunk)
             current = {
                 frame: {ids[sam_id]: record for sam_id, record in objects.items()}
                 for frame, objects in found.items()
             }
-            tracks = {frame: objects for frame, objects in tracks.items() if frame < first}
-            tracks.update({frame: o for frame, o in current.items() if frame >= first})
+            tracks = {frame: objects for frame, objects in tracks.items() if frame < handover}
+            tracks.update({f: objects for f, objects in current.items() if f >= handover})
             previous, previous_chunk = current, chunk
         for frame in sorted(tracks):
             ranked = sorted(tracks[frame].items(), key=lambda item: -(item[1].confidence or 0.0))
@@ -183,29 +185,35 @@ class MetaApiSegmenter:
 
         span = f"frames {chunk.start}-{chunk.stop}"
         digest = input_hash("video", video_sha, span, prompt, metadata)
-        result = self._respond(digest, request, video_segmentation_format())
+        result = self._respond(digest, request, video_segmentation_format(), len(chunk))
         found: dict[int, dict[str, SegmentationMaskRecord]] = defaultdict(dict)
         for record in _masks(result):
-            assert record.frame is not None  # video records always carry their frame
-            if record.frame.frame_index >= len(chunk):
-                raise SamResponseError(
-                    f"SAM 3.1 returned frame {record.frame.frame_index} of {len(chunk)} in a chunk"
-                )
-            found[chunk.start + record.frame.frame_index][record.object_id] = record
+            found[chunk.start + _frame_index(record)][record.object_id] = record
         return found
 
     def _respond[R: SegmentationResult](
-        self, digest: str, request: Callable[[], Request], format_: ResponseFormat[Any, R]
+        self,
+        digest: str,
+        request: Callable[[], Request],
+        format_: ResponseFormat[Any, R],
+        n_frames: int | None = None,
     ) -> R:
         """The parsed response, from the cache when this exact input was seen before. `request`
         is built only on a miss, so a cached re-run uploads nothing. Only a complete,
-        well-formed response is cached."""
+        well-formed response is cached: for a video of `n_frames`, every frame marker must be
+        one of its frames."""
         model = self.settings.model
         cached = self.cache.get(model, PROMPT_VERSION, digest)
         if cached is not None:
             return _parse(cached, format_)
         events = list(self.transport.stream(request()))
         result = _parse(events, format_)
+        if n_frames is not None:
+            for record in _masks(result):
+                if not 0 <= _frame_index(record) < n_frames:
+                    raise SamResponseError(
+                        f"SAM 3.1 returned frame {_frame_index(record)} of a {n_frames}-frame video"
+                    )
         self.cache.put(model, PROMPT_VERSION, digest, events)
         return result
 
@@ -248,14 +256,20 @@ def _masks(result: SegmentationResult) -> list[SegmentationMaskRecord]:
     return list(latest.values())
 
 
+def _frame_index(record: SegmentationMaskRecord) -> int:
+    if record.frame is None:
+        raise SamResponseError(f"SAM 3.1 video record for object {record.object_id} has no frame")
+    return record.frame.frame_index
+
+
 def _to_mask(
     record: SegmentationMaskRecord, shape: tuple[int, int], object_id: str | None = None
 ) -> Mask:
     """Paste the box-local mask into a full-frame canvas at its box."""
     raster = np.frombuffer(decode_mask_to_raster(record.mask), dtype=np.uint8)
     local = raster.reshape(record.mask.height, record.mask.width)
-    b = record.bounds
-    left, top, right, bottom = int(b.left), int(b.top), int(b.right), int(b.bottom)
+    box = record.bounds
+    left, top, right, bottom = int(box.left), int(box.top), int(box.right), int(box.bottom)
     if local.shape != (bottom - top, right - left):
         local = cv2.resize(local, (right - left, bottom - top), interpolation=cv2.INTER_NEAREST)
     pixels = np.zeros(shape, dtype=bool)
@@ -279,16 +293,17 @@ def _decoded(
 
 
 def _video_shape(video: Path) -> tuple[tuple[int, int], int]:
-    """(height, width) and the frame count."""
-    capture = cv2.VideoCapture(str(video))
-    try:
-        shape = (
-            int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT)),
-            int(capture.get(cv2.CAP_PROP_FRAME_WIDTH)),
-        )
-        return shape, int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
-    finally:
-        capture.release()
+    """(height, width) and the exact frame count: packets counted, not the container's
+    estimate, since chunking and the frame-range check rest on it."""
+    out = subprocess.run(
+        [
+            "ffprobe", "-v", "error", "-select_streams", "v:0", "-count_packets",
+            "-show_entries", "stream=width,height,nb_read_packets", "-of", "json", str(video),
+        ],
+        check=True, capture_output=True, text=True,
+    ).stdout  # fmt: skip
+    stream = json.loads(out)["streams"][0]
+    return (int(stream["height"]), int(stream["width"])), int(stream["nb_read_packets"])
 
 
 def _cut(video: Path, frames: range, dest: Path) -> Path:
