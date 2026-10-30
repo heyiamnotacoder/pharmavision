@@ -186,13 +186,13 @@ purity.
   The API takes at most 5 videos per request, so the settings refuse more than 4 examples. The
   committed set (`judge/few_shot/`, 2 rears and 2 hard negatives, `few_shot_examples()`) is
   **off by default**: it did not make the labels trustworthy (open decision 3).
-- Every candidate becomes one event with `source = model`, so each verdict is auditable; a rear
-  count is the events labelled `rearing`. An event under `BehaviourSettings.min_confidence`
+- Every candidate becomes one event with `source = model`, so each verdict is auditable. An
+  event under `BehaviourSettings.min_confidence`
   (0.6) is marked `low_confidence` and reported as such. The settings are versioned in the
   manifest.
 - **Measured Oct 30 (open decision 3): Muse Spark labels are not trusted for rear counts,**
-  zero-shot or few-shot. Rear counts must not come from model events until a measured rear
-  scorer replaces or gates them.
+  zero-shot or few-shot. No rear count comes from the events labelled `rearing`: until a
+  measured rear scorer replaces or gates them, the report abstains on rear counts.
 
 ### 6. QC (measures, then judges)
 - Deterministic flags (`measure/qc.py`, T6a), on the raw track, with every threshold in a
@@ -394,7 +394,9 @@ the demo and write-up, the same way PaedScale published its validation table.
    rear-candidate clips from the 6 train videos: rears all three raters marked (≥ 0.6 s, mostly
    inside the clip) and hard negatives (no rater's rear within 1 s). It keeps 2 s away from the
    20 T2 clips and from OFT_16 540–600 s (the smoke run). From it, 4 examples, checked by eye:
-   a supported and an unsupported rear, a turn at the wall and a turn on the spot. The other
+   a supported and an unsupported rear, a turn at the wall and a turn on the spot (no still or
+   sitting negative: the 5-video limit leaves room for two; one turn ends 2.4 s before a T2
+   clip, just outside the margin). The other
    80 clips (34 rears, 46 hard negatives) are a held-out test of the same kind as the false
    positives. Contributor tier; the smoke run is standard, like its baseline.
 
@@ -413,7 +415,7 @@ the demo and write-up, the same way PaedScale published its validation table.
    - **The mask features already separate better.** On all 900 train-split candidates that are
      a consensus rear or a hard negative, a logistic fit on duration, area drop, elongation
      change and speed, scored leave-one-video-out, gives AUC 0.75, κ 0.37, precision 0.71,
-     recall 0.74 (one-off check, not kept in the repo).
+     recall 0.74 (one-off check; the scorer's own spike will replace it with a kept script).
 
    **Rule:** few-shot stays off by default and the model's rear labels are not trusted. Rear
    detection moves to a measured scorer on the mask features (measures layer), fitted on the

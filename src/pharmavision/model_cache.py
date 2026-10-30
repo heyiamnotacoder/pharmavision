@@ -8,6 +8,7 @@ import gzip
 import hashlib
 import json
 import os
+import threading
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -52,7 +53,8 @@ class ResponseCache:
         """Write atomically, so an interrupted run never leaves a truncated entry behind."""
         path = self._path(model, prompt_version, input_digest)
         path.parent.mkdir(parents=True, exist_ok=True)
-        partial = path.with_name(f"{path.name}.{os.getpid()}.partial")
+        # Unique per process and thread: parallel requests may write the same entry.
+        partial = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.partial")
         with gzip.open(partial, "wt") as f:
             f.writelines(json.dumps(event) + "\n" for event in events)
         partial.replace(path)

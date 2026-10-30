@@ -6,7 +6,8 @@ the arena. The video is read once for all clips; the model never sees the full v
 
 import subprocess
 import tempfile
-from collections.abc import Iterator, Sequence
+from collections.abc import Generator, Sequence
+from contextlib import closing
 from pathlib import Path
 
 import cv2
@@ -34,12 +35,13 @@ Box = tuple[int, int, int]
 
 def run(run: RunFolder, judge: Judge) -> None:
     run.confirmed_arena()  # the gate, before reading anything else
-    settings, video = run.manifest().behaviours, run.manifest().video
+    manifest = run.manifest()
+    settings = manifest.behaviours
     candidates = run.metrics().rear_candidates
-    spans = [clip_span(c, video, settings) for c in candidates]
+    spans = [clip_span(c, manifest.video, settings) for c in candidates]
     events: dict[int, BehaviourEvent] = {}
-    with tempfile.TemporaryDirectory() as tmp:
-        for k, clip in cut_clips(run, spans, Path(tmp)):
+    with tempfile.TemporaryDirectory() as tmp, closing(cut_clips(run, spans, Path(tmp))) as clips:
+        for k, clip in clips:
             judgement = judge.classify_clip(clip)
             events[k] = BehaviourEvent(
                 first_frame=candidates[k].first_frame,
@@ -53,7 +55,7 @@ def run(run: RunFolder, judge: Judge) -> None:
     run.write_events(Events(events=[events[k] for k in range(len(spans))]))
 
 
-def cut_clips(run: RunFolder, spans: Sequence[range], dest: Path) -> Iterator[tuple[int, Clip]]:
+def cut_clips(run: RunFolder, spans: Sequence[range], dest: Path) -> Generator[tuple[int, Clip]]:
     """Each span's clip, cropped and outlined, as `dest/<k>.mp4` for the k-th span. The video is
     read once, front to back, so clips come in the order their spans end."""
     arena = run.confirmed_arena()

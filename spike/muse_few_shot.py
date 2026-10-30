@@ -6,6 +6,7 @@ Usage:
   uv run python -m spike.muse_few_shot build   # cut the examples in few_shot/examples.json
   uv run python -m spike.muse_few_shot score   # T2 clips and the pool hold-out, with and without
   uv run python -m spike.muse_few_shot again   # the hold-out asked a second time: label noise
+  uv run python -m spike.muse_few_shot smoke [few]   # the 60 s smoke run (OFT_16 540-600 s)
 
 Every clip is cut the way the behaviours stage cuts it (`cut_clips`), from the train videos' run
 folders that `spike.rear_recall` made. The pool is rear-candidate clips that either show a rear
@@ -18,6 +19,8 @@ is also given at the standard rate. Needs MODEL_API_KEY in .env, `python -m spik
 
 import json
 import random
+import shutil
+import subprocess
 import sys
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -36,8 +39,12 @@ from pharmavision.judge.muse_spark import (
 )
 from pharmavision.measure.open_field import open_field_metrics
 from pharmavision.model_cache import Event, input_hash
+from pharmavision.pipeline import Stage, confirm_arena, run_stage, start_run
+from pharmavision.segmenter.config import make_segmenter
+from pharmavision.segmenter.meta_api import MetaApiSettings
+from pharmavision.stages import behaviours
 from pharmavision.stages.behaviours import clip_span, cut_clips
-from spike.common import FPS
+from pharmavision.templates import OPEN_FIELD
 from spike.data import LABELS, SPLIT, VIDEOS
 from spike.muse_clips import N_PER_KIND, duration_s
 from spike.rears import Agreement, Rear, agreement, consensus_rears, load_rears, pick_clips
@@ -50,6 +57,8 @@ KEEP_OUT_S = 2.0  # pool clips stay this far from a T2 clip
 SMOKE = ("OFT_16", 540.0, 600.0)
 NEGATIVE_MARGIN_S = 1.0  # a hard negative is this far from any rater's rear
 MIN_REAR_S = 0.6  # a clear rear lasts this long, by consensus
+ALL_RATERS = 3  # a clear rear is marked by every rater
+MIN_INSIDE = 0.8  # and lies at least this share inside the clip
 PER_VIDEO = {"supported": 3, "unsupported": 3, "none": 8}
 SEED = 20261030
 WORKERS = 8  # parallel requests, well under the 150 RPM limit
@@ -97,7 +106,8 @@ def classify(window: tuple[float, float], rears: list[Rear]) -> Kind | None:
             if r.kind == c.kind and overlaps((r.start, r.end), (c.start, c.end))
         }
         inside = min(c.end, end) - max(c.start, start)
-        if len(raters) == 3 and c.end - c.start >= MIN_REAR_S and inside >= 0.8 * (c.end - c.start):
+        long_enough = c.end - c.start >= MIN_REAR_S
+        if len(raters) == ALL_RATERS and long_enough and inside >= MIN_INSIDE * (c.end - c.start):
             return c.kind
     return None
 
@@ -216,13 +226,17 @@ def summarise(name: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 def score() -> None:
     examples = few_shot_examples()
-    kept = {(e.video_id, e.clip.name) for e in examples}
-    t2 = [PoolClip(v, round(s * FPS), round(e * FPS), s, e, k) for v, s, e, k in t2_windows()]
+    entries = json.loads((FEW_SHOT_DIR / "examples.json").read_text())
+    shown = {(e["video_id"], e["start_s"]) for e in entries}
+    t2: list[PoolClip] = []
+    for v, s, e, k in t2_windows():
+        fps = run_folder(v).manifest().video.fps
+        t2.append(PoolClip(v, round(s * fps), round(e * fps), s, e, k))
     pool_rows = json.loads((OUT / "pool.json").read_text())
     held_out = [
         PoolClip(**{f: r[f] for f in PoolClip.__dataclass_fields__})
         for r in pool_rows
-        if (r["video_id"], f"{r['video_id']}_{r['start_s']:.3f}.mp4") not in kept
+        if (r["video_id"], round(r["start_s"], 3)) not in shown
     ]
     results: dict[str, Any] = {}
     for name, j in (("zero-shot", judge()), ("few-shot", judge(examples))):
@@ -260,5 +274,65 @@ def again() -> None:
     (OUT / "again.json").write_text(json.dumps(results, indent=2) + "\n")
 
 
+def smoke_source() -> RunFolder:
+    """The smoke run: OFT_16 540-600 s cut to its own 60 s video, ingested with the protocol
+    length set to 60 s (ingest refuses a short clip otherwise), tracked and measured. Made once;
+    SAM 3.1 responses are cached."""
+    pointer = OUT / "smoke.run"
+    if pointer.exists():
+        return RunFolder(Path(pointer.read_text().strip()))
+    video_id, start, end = SMOKE
+    clip = OUT / f"{video_id}_{start:.0f}-{end:.0f}.mp4"
+    subprocess.run(
+        ["ffmpeg", "-v", "error", "-y", "-ss", f"{start}", "-to", f"{end}",
+         "-i", str(VIDEOS / f"{video_id}.mp4"), "-c:v", "libx264", "-an", str(clip)],
+        check=True,
+    )  # fmt: skip
+    template = OPEN_FIELD.model_copy(update={"protocol_duration_s": end - start})
+    segmenter = make_segmenter(MetaApiSettings())
+    runs = OUT / "smoke-runs"
+    runs.mkdir(parents=True, exist_ok=True)
+    run = start_run(clip, template, segmenter, runs)
+    confirm_arena(run)
+    for stage in (Stage.TRACK, Stage.MEASURE):
+        run_stage(run, stage, segmenter, judge())  # the judge is never called
+    pointer.write_text(f"{run.path}\n")
+    return run
+
+
+def smoke(few: bool) -> None:
+    """Re-judge a copy of the smoke run on the standard tier, like its zero-shot baseline, and
+    score its events against the raters: a `rearing` event is on a rear when its window
+    overlaps any rater's rear."""
+    run = RunFolder(OUT / f"smoke-{'few' if few else 'zero'}-shot")
+    shutil.rmtree(run.path, ignore_errors=True)
+    shutil.copytree(smoke_source().path, run.path)
+    settings = MuseSparkSettings(few_shot=few_shot_examples() if few else ())
+    behaviours.run(run, MuseSparkJudge(settings))
+    video_id, offset, end = SMOKE
+    labels = [r for r in load_rears(LABELS) if r.video_id == video_id]
+    rears = [(r.start, r.end) for r in labels if overlaps((r.start, r.end), (offset, end))]
+    agreed = [
+        (c.start, c.end)
+        for c in consensus_rears(labels)
+        if overlaps((c.start, c.end), (offset, end))
+    ]
+    fps = run.manifest().video.fps
+    windows = [
+        ((e.first_frame / fps + offset, (e.last_frame + 1) / fps + offset), e.label)
+        for e in run.events().events
+    ]
+    called = [w for w, label in windows if label == "rearing"]
+    on_a_rear = [w for w in called if any(overlaps(w, r) for r in rears)]
+    found = [c for c in agreed if any(overlaps(w, c) for w in called)]
+    print(
+        f"{len(windows)} events, {len(called)} rearing: {len(on_a_rear)}/{len(called)} on a rear; "
+        f"consensus rears found {len(found)}/{len(agreed)}"
+    )
+
+
 if __name__ == "__main__":
-    {"pool": pool, "build": build, "score": score, "again": again}[sys.argv[1]]()
+    if sys.argv[1] == "smoke":
+        smoke(few=sys.argv[2:] == ["few"])
+    else:
+        {"pool": pool, "build": build, "score": score, "again": again}[sys.argv[1]]()
