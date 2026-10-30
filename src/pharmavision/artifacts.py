@@ -65,7 +65,7 @@ class MeasureSettings(Artifact):
     """Every threshold the measure stage uses. Times are in seconds and distances in cm, so a
     setting means the same at any fps or frame size."""
 
-    version: int = 2
+    version: int = 3
     """Bump when a default or a metric's definition changes, so metrics from different versions
     are never compared as if alike."""
     median_window_frames: int = Field(default=5, ge=1)
@@ -87,19 +87,20 @@ class MeasureSettings(Artifact):
     """The animal's usual mask area and elongation at each frame: their running median over
     this window, centred on the frame. Local, not one value per trial, because the wide-angle
     lens changes the animal's apparent size across the arena."""
-    rear_area_drop: float = Field(default=0.1, gt=0, lt=1)
+    rear_area_drop: float = Field(default=0.03, gt=0, lt=1)
     """Rear candidate frame: the mask area is at least this fraction below its baseline, ..."""
-    rear_elongation_change: float = Field(default=0.1, gt=0)
+    rear_elongation_change: float = Field(default=0.05, gt=0)
     """... the elongation (major over minor axis) differs from its baseline by at least this
     fraction, either way, ..."""
-    rear_max_speed_cm_s: float = Field(default=10.0, ge=0)
-    """... and the centroid moves at most this fast. The defaults favour recall (about 110
-    windows over 16% of the time on Sturman OFT_16): stage 5 judges every candidate, but can
-    never find a rear that no candidate holds."""
+    rear_max_speed_cm_s: float = Field(default=15.0, ge=0)
+    """... and the centroid moves at most this fast. The defaults favour recall: on the 6
+    Sturman train videos a candidate overlaps 91% of consensus rears, with about 180 windows
+    over 41% of the time (open decision 2). Stage 5 judges every candidate, but can never find
+    a rear that no candidate holds."""
     rear_merge_s: float = Field(default=0.5, ge=0)
     """A break of less than this between candidate frames joins them into one window, unless
     the position is unknown somewhere in the break, so a flickering rear is one candidate."""
-    rear_min_s: float = Field(default=0.2, ge=0)
+    rear_min_s: float = Field(default=0.1, ge=0)
     """A candidate window lasts at least this long."""
 
     @model_validator(mode="after")

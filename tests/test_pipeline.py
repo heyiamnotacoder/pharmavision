@@ -214,7 +214,7 @@ def test_the_manifest_records_the_versioned_measure_settings(
     )
 
     assert default_run.manifest().measure == MeasureSettings()
-    assert default_run.manifest().measure.version == 2
+    assert default_run.manifest().measure.version == 3
     assert custom_run.manifest().measure == custom
 
 
