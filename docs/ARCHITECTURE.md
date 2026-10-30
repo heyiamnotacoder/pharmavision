@@ -290,6 +290,21 @@ purity.
   against the tool outputs, with a rounding tolerance. Any unmatched number fails the report and
   the agent is re-prompted with the list of offending numbers. After 2 failures the report ships
   with those sentences struck out and flagged.
+  - Built in T8a as the pure `audit/` package (no I/O, no model calls, pyright strict).
+    `known_values` flattens the tool outputs into numbers sourced by field path
+    (`stats.metrics[0].comparison.p`), plus each list's length (`len(qc.exclusions)`) for the
+    counts. Numbers inside strings are never known: a string may be model-written.
+  - `audit_numbers` finds each number in the prose (decimals, thousands commas, percents,
+    `1.6e-3` and `1.6 × 10⁻³`), skipping identifiers (`B07`, `OFT_16`) and the
+    `AuditSettings.allowed_phrases` ("ARRIVE 2.0", "Essential 10"). A number matches when a
+    known value rounds to it: within half a unit of its last written digit, magnitudes only (a
+    sign is as often a word), a percent against the value × 100. The "95" of "95% CI" matches
+    `ci_level`, not an allow-list, so a study at another level fails.
+  - The result, `NumberAudit`, lists every number with its matched source or none, and the
+    sentence it is in with its offsets, for the re-prompt and the strike-out.
+  - Known strictness: thresholds such as "p < 0.001" match only a known value that rounds to
+    them, so the agent is to state exact p values; and numbers that exist only inside a
+    deterministic reason string (a QC flag's "17% of frames") must reach the agent as fields.
 - Rearing counts: the agent states that the pipeline does not count rears and why (ADR 0003);
   `get_events_summary` gives the number of candidate windows, never a rear count.
 

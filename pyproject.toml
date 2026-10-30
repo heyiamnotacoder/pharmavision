@@ -56,12 +56,17 @@ extend-exclude = [".claude"]
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "NPY", "PD"]
 
+[tool.ruff.lint.per-file-ignores]
+# Its fixture prose is written as a report would be: with the × and − signs ruff flags.
+"tests/test_number_audit.py" = ["RUF001"]
+
 [tool.pyright]
 include = ["src", "tests", "spike"]
 pythonVersion = "3.12"
 typeCheckingMode = "standard"
-# NFR-6: the measure and stats layers are where every number comes from, so they are strict.
-strict = ["src/pharmavision/measure", "src/pharmavision/stats"]
+# NFR-6: the measure and stats layers are where every number comes from, and the audit is what
+# keeps every other number out, so they are strict.
+strict = ["src/pharmavision/measure", "src/pharmavision/stats", "src/pharmavision/audit"]
 venvPath = "."
 venv = ".venv"
 
