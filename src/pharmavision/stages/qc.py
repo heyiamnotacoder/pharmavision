@@ -22,7 +22,7 @@ from ..artifacts import (
     RunFolder,
 )
 from ..judge import FlaggedWindow, HandSighting, Judge
-from ..measure.qc import trial_qc
+from ..measure.qc import largest_area_cm2, trial_qc
 from ..segmenter import Segmenter
 from .clips import ClipView, cut_clips, read_frames, span_about
 
@@ -87,11 +87,11 @@ def _hand(
     segmenter: Segmenter, image: NDArray[np.uint8], frame_index: int, prompt: str, px_per_cm: float
 ) -> HandSighting | None:
     """The prompt's largest mask on the frame, or None when it finds nothing."""
-    areas = [int(mask.pixels.sum()) for mask in segmenter.segment_image(image, prompt)]
-    largest = max((a for a in areas if a), default=0)
-    if not largest:
+    masks = [mask.pixels for mask in segmenter.segment_image(image, prompt)]
+    area_cm2 = largest_area_cm2(masks, px_per_cm)
+    if area_cm2 is None:
         return None
-    return HandSighting(prompt=prompt, frame_index=frame_index, area_cm2=largest / px_per_cm**2)
+    return HandSighting(prompt=prompt, frame_index=frame_index, area_cm2=area_cm2)
 
 
 def _whole_frame_view(flag: QcFlag, video: NormalisedVideo, settings: QcReviewSettings) -> ClipView:

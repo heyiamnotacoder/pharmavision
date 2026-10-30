@@ -1,12 +1,11 @@
 """Muse Spark on the Meta Model API: the primary Judge backend.
 
 One Responses request per clip (a rear candidate's, or a flagged QC window's), streamed, with
-structured output. The clip goes inline as a
-base64 MP4 sampled at `input_fps`; few-shot examples go ahead of it as earlier turns (a user
-turn with the example clip, then an assistant turn replaying its label). Every response is
-cached by model id, prompt version and the hash of the clip's frames (and of the prompt and
-examples),
-so a re-run makes no API call, and the recorded Judge replays the same cache with no API at all."""
+structured output. The clip goes inline as a base64 MP4 sampled at `input_fps`; few-shot
+examples go ahead of a rear clip as earlier turns (a user turn with the example clip, then an
+assistant turn replaying its label). Every response is cached by model id, prompt version and
+the hash of the clip's frames (and of the prompt and examples), so a re-run makes no API call,
+and the recorded Judge replays the same cache with no API at all."""
 
 import base64
 import json

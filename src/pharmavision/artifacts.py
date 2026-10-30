@@ -181,7 +181,6 @@ class QcSettings(Artifact):
     and how the model reviews the flags."""
 
     version: int = 2
-
     """Bump when a default or a flag's definition changes."""
     max_tracking_loss_fraction: float = Field(default=0.05, ge=0, le=1)
     """A trial whose animal is missing on more than this fraction of frames is excluded
@@ -425,7 +424,9 @@ class Exclusion(Artifact):
 
 class QcReview(Artifact):
     """The model review of one flagged window: what SAM 3.1's hand prompts found on its sampled
-    frames, and the judge's verdict with its reason. Every verdict is listed, kept or not."""
+    frames, and the judge's verdict with its reason. Every verdict is listed, kept or not. For a
+    flag longer than `QcReviewSettings.clip_max_s` the judge saw only its middle, and an
+    `exclude_window` verdict still leaves out all of the flag's frames: the safer error."""
 
     flag: QcFlag
     hands: list[HandSighting]

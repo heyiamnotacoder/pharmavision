@@ -229,7 +229,10 @@ purity.
     `clip_max_side_px` (480), mask outlined in green, cut by the same `stages/clips.py` as the
     behaviours clips. The prompt states the flag's kind, frames and reason and the hand
     sightings, and asks for `{verdict: keep | exclude_window | exclude_trial, reason}`, cached
-    under `<model>/qc-v1/<hash>`. It is told not to state numbers in its reason (number audit).
+    under `<model>/qc-v1/<hash>`. It is told not to state numbers in its reason, but nothing
+    enforces that yet: the T9 number audit must cover the reasons in `qc.json` too. A flag
+    longer than `clip_max_s` is judged on its middle, and `exclude_window` still leaves out all
+    of its frames (the safer error).
   - Each review (flag, sightings, verdict, reason) is listed in `qc.json` `reviews`, kept or
     not. `exclude_window` adds a window exclusion over the flag's frames and `exclude_trial` a
     trial exclusion, both `source: model` with the model's reason. The manifest records the

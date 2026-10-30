@@ -17,6 +17,7 @@ from pharmavision.judge.muse_spark import (
     RecordedJudge,
 )
 from pharmavision.measure.geometry import Point
+from pharmavision.measure.qc import trial_qc
 from pharmavision.pipeline import RunFolder
 from pharmavision.segmenter import Mask
 from pharmavision.segmenter.synthetic import SyntheticSegmenter
@@ -130,13 +131,14 @@ def test_with_the_review_off_the_deterministic_qc_stands_alone(
 ) -> None:
     excluding = WindowVerdict(verdict="exclude_trial", reason="Never asked.")
     judge, spy = ScriptedJudge(verdict=excluding), PromptSpy()
-    off = QcSettings(review=None)
-    deterministic = intruded_run(tmp_path, runs_dir, ScriptedJudge(), QcSettings(review=None))
 
-    run = intruded_run(tmp_path, runs_dir, judge, off, spy)
+    run = intruded_run(tmp_path, runs_dir, judge, QcSettings(review=None), spy)
 
-    assert run.manifest().qc.review is None
-    assert run.qc() == deterministic.qc()
+    manifest = run.manifest()
+    assert manifest.qc.review is None
+    # Exactly what T6a's deterministic QC gives on the same track.
+    t6a = trial_qc(run.track(), run.arena(), run.metrics().gaps, manifest.video, manifest.qc)
+    assert run.qc() == t6a
     assert [(f.kind, f.first_frame, f.last_frame) for f in run.qc().flags] == [
         ("second_mask", 40, 49)
     ]
