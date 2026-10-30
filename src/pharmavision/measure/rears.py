@@ -31,9 +31,9 @@ def rear_candidates(
     the break is unknown, and windows shorter than `rear_min_s` are dropped. Each window carries
     its features over the frames where they are known, and their score by
     `settings.rear_scorer`."""
-    window = max(1, round(settings.rear_baseline_s * fps)) | 1  # odd, so it centres on a frame
-    area_baseline = _running_median(areas_px, window)
-    elongation_baseline = _running_median(elongations, window)
+    baseline_frames = max(1, round(settings.rear_baseline_s * fps)) | 1  # odd: centred on a frame
+    area_baseline = _running_median(areas_px, baseline_frames)
+    elongation_baseline = _running_median(elongations, baseline_frames)
     candidate = [
         area is not None
         and elongation is not None
@@ -60,22 +60,22 @@ def rear_candidates(
         elongation_baseline
     )
     speed = np.array([np.nan if v is None else v for v in speeds_cm_s], dtype=np.float64)
-    found_windows: list[RearCandidate] = []
+    # A window starts and ends on a candidate frame, where everything is known, so no slice is
+    # all NaN; merged breaks may hold unknown masks, which the nan-functions skip.
+    windows: list[RearCandidate] = []
     for s in stretches(candidate):
         if not s.value or s.length / fps < settings.rear_min_s:
             continue
-        window = slice(s.start, s.start + s.length)
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", RuntimeWarning)  # a frame of the window unknown
-            features = RearFeatures(
-                duration_s=s.length / fps,
-                area_drop=float(1 - np.nanmin(area_ratio[window])),
-                mean_area_drop=float(1 - np.nanmean(area_ratio[window])),
-                elongation_change=float(np.nanmax(np.abs(elongation_ratio[window] - 1))),
-                mean_speed_cm_s=float(np.nanmean(speed[window])),
-                mean_area_cm2=float(np.nanmean(area[window])) / px_per_cm**2,
-            )
-        found_windows.append(
+        frames = slice(s.start, s.start + s.length)
+        features = RearFeatures(
+            duration_s=s.length / fps,
+            area_drop=float(1 - np.nanmin(area_ratio[frames])),
+            mean_area_drop=float(1 - np.nanmean(area_ratio[frames])),
+            elongation_change=float(np.nanmax(np.abs(elongation_ratio[frames] - 1))),
+            mean_speed_cm_s=float(np.nanmean(speed[frames])),
+            mean_area_cm2=float(np.nanmean(area[frames])) / px_per_cm**2,
+        )
+        windows.append(
             RearCandidate(
                 first_frame=s.start,
                 last_frame=s.start + s.length - 1,
@@ -83,16 +83,19 @@ def rear_candidates(
                 score=rear_score(features, settings.rear_scorer),
             )
         )
-    return found_windows
+    return windows
 
 
 def rear_score(features: RearFeatures, scorer: RearScorer) -> float:
-    """The logistic of the intercept plus each feature times its weight."""
-    weights = scorer.weights.model_dump()
+    """The logistic of the intercept plus each feature times its weight, computed so that no
+    feature value, however extreme, overflows."""
     z = scorer.intercept + sum(
-        weights[name] * value for name, value in features.model_dump().items()
+        getattr(scorer.weights, name) * getattr(features, name)
+        for name in RearFeatures.model_fields
     )
-    return 1 / (1 + math.exp(-z))
+    if z >= 0:
+        return 1 / (1 + math.exp(-z))
+    return math.exp(z) / (1 + math.exp(z))
 
 
 def _running_median(values: Sequence[float | None], window: int) -> list[float]:

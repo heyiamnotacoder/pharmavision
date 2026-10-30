@@ -12,9 +12,10 @@ counts do not agree with the raters:
 | | Train, leave-one-video-out | Eval split (14 videos) |
 |---|---|---|
 | Per candidate | AUC 0.75, κ 0.37, precision 0.74, recall 0.67 | AUC 0.71, κ 0.29, precision 0.66, recall 0.74 |
-| Per-video count against the raters (Pearson r) | 0.53 | **0.07** (raters against each other: 0.90) |
-| The number of candidates alone | 0.35 | 0.41 |
-| The sum of scores | 0.64 (in-sample) | 0.22 |
+| Per-video count against the raters, ICC(2,1) (Pearson r) | 0.57 (0.53) | **0.05 (0.07)** |
+| Raters against each other, ICC (r) | 0.97 (0.98) | 0.90 (0.90) |
+| Counting all candidates instead, ICC | 0.02 | 0.02 |
+| Summing the scores instead, ICC | 0.33 | 0.11 |
 
 The errors are video-specific: some animals make many compact, still postures that look like
 rears in the mask (OFT_23: 149 counted, the raters about 47). Muse Spark, the other judge, was
@@ -27,8 +28,10 @@ We decided (Oct 31):
 2. **The score stays as evidence.** Each rear candidate keeps its features and its score
    (`MeasureSettings.rear_scorer`), and Muse Spark's label and rationale stay on its event as a
    second opinion. Both are shown per window, never summed into a count.
-3. **FR-6 is reported as not met**, with the numbers above, in the eval report. The harness
-   keeps measuring it, so a better signal can be judged against the same bar.
+3. **FR-6 is reported as not met**, with the numbers above: in REQUIREMENTS and the
+   ARCHITECTURE eval table now, and in the eval report when the harness lands (Nov 2). The
+   harness keeps measuring it, along with Muse Spark's agreement with the raters and the score
+   (ADR 0002 point 2), so a better signal can be judged against the same bar.
 
 ## Considered options
 
@@ -42,6 +45,11 @@ We decided (Oct 31):
 
 - The scorer has no threshold: a count threshold (0.55) exists only in the spike, to measure
   count agreement.
+- `metrics.json` from settings before v4 has no features or scores and no longer loads; re-run
+  the measure stage on such a run folder (it costs no API call).
+- The submitted application (docs/application.md) promises rearing counts that agree with the
+  raters as well as they agree with each other. That was measured and is not met; the demo and
+  README must say so.
 - The rear-candidate stage keeps its recall-first settings (ADR 0001): the windows remain the
   places worth showing a reviewer.
 - A lab using PharmaVision sees each candidate window with its score and Muse Spark's opinion,

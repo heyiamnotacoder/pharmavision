@@ -8,7 +8,7 @@ import pytest
 from pycocotools import mask as coco_mask
 
 from pharmavision.artifacts import MeasureSettings, RearCandidate, RearFeatures, RearScorer
-from pharmavision.measure.rears import rear_candidates
+from pharmavision.measure.rears import rear_candidates, rear_score
 from pharmavision.measure.shape import mask_elongations
 
 FPS = 10.0
@@ -21,10 +21,6 @@ SETTINGS = MeasureSettings(
     rear_merge_s=0.5,
     rear_min_s=0.2,
 )
-
-
-def window(first: int, last: int) -> tuple[int, int]:
-    return (first, last)
 
 
 def frames(found: list[RearCandidate]) -> list[tuple[int, int]]:
@@ -51,27 +47,27 @@ def windows(
 
 
 def test_a_body_turning_rounder_counts_as_an_elongation_change() -> None:
-    assert windows(100, set(range(40, 50)), rear=(50.0, 1.5)) == [window(40, 49)]
+    assert windows(100, set(range(40, 50)), rear=(50.0, 1.5)) == [(40, 49)]
 
 
 def test_a_break_shorter_than_the_merge_time_joins_two_windows() -> None:
     # Breaks of 0.2 s (frames 45-46) and 0.6 s (frames 52-57).
     rearing = {*range(40, 45), *range(47, 52), *range(58, 63)}
 
-    assert windows(100, rearing) == [window(40, 51), window(58, 62)]
+    assert windows(100, rearing) == [(40, 51), (58, 62)]
 
 
 def test_a_kept_gap_keeps_two_windows_apart() -> None:
     rearing = {*range(40, 45), *range(47, 52)}
 
     assert windows(100, rearing, unknown=frozenset({45, 46})) == [
-        window(40, 44),
-        window(47, 51),
+        (40, 44),
+        (47, 51),
     ]
 
 
 def test_a_window_shorter_than_the_minimum_is_dropped() -> None:
-    assert windows(100, {40, 60, 61}) == [window(60, 61)]
+    assert windows(100, {40, 60, 61}) == [(60, 61)]
 
 
 def test_the_baseline_follows_the_animal_across_the_arena() -> None:
@@ -86,7 +82,7 @@ def test_the_baseline_follows_the_animal_across_the_arena() -> None:
     local = SETTINGS.model_copy(update={"rear_baseline_s": 2.0})
 
     assert frames(rear_candidates(areas, elongations, speeds, FPS, PX_PER_CM, local)) == [
-        window(150, 159)
+        (150, 159)
     ]
     # Against one baseline for the whole trial (a 40 s window), the rear is missed.
     trial = SETTINGS.model_copy(update={"rear_baseline_s": 40.0})
@@ -157,3 +153,27 @@ def test_the_score_is_the_logistic_of_the_weighted_features() -> None:
 
     # -1 + 1.0 * 1.0 + 2.0 * 0.5 - 1.0 * 0.5 - 0.5 * 2.0 = -0.5
     assert found.score == pytest.approx(1 / (1 + math.exp(0.5)))
+
+
+def test_an_extreme_feature_saturates_the_score_without_overflow() -> None:
+    weights = RearFeatures(
+        duration_s=0,
+        area_drop=0,
+        mean_area_drop=0,
+        elongation_change=0,
+        mean_speed_cm_s=0,
+        mean_area_cm2=-1.0,
+    )
+    huge = RearFeatures(
+        duration_s=1,
+        area_drop=0,
+        mean_area_drop=0,
+        elongation_change=0,
+        mean_speed_cm_s=0,
+        mean_area_cm2=1e6,
+    )
+
+    rising = weights.model_copy(update={"mean_area_cm2": 1.0})
+
+    assert rear_score(huge, RearScorer(intercept=0, weights=weights)) == 0.0
+    assert rear_score(huge, RearScorer(intercept=0, weights=rising)) == 1.0

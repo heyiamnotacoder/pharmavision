@@ -165,42 +165,63 @@ def candidate_scores(videos: list[Video], thresholds: list[float]) -> dict[str, 
     }
 
 
-def count_agreement(videos: list[Video], thresholds: list[float]) -> dict[str, Any]:
-    """Per-video rear counts: the scorer (each video at its own threshold) against each rater,
-    and each pair of raters. Pearson r, and the mean absolute difference as a share of the
-    pair's mean count."""
+def icc(a: list[float], b: list[float]) -> float:
+    """ICC(2,1) of two sets of per-video counts: two-way random effects, absolute agreement, one
+    rater, the per-video count ICC the eval table asks for."""
+    y = np.c_[a, b]
+    n, k = y.shape
+    grand = y.mean()
+    ms_rows = k * ((y.mean(axis=1) - grand) ** 2).sum() / (n - 1)
+    ms_cols = n * ((y.mean(axis=0) - grand) ** 2).sum() / (k - 1)
+    residual = y - y.mean(axis=1, keepdims=True) - y.mean(axis=0, keepdims=True) + grand
+    ms_error = (residual**2).sum() / ((n - 1) * (k - 1))
+    return float(
+        (ms_rows - ms_error) / (ms_rows + (k - 1) * ms_error + k * (ms_cols - ms_error) / n)
+    )
 
-    def compare(a: list[float], b: list[float]) -> dict[str, float]:
-        x, y = np.array(a), np.array(b)
-        r = float(np.corrcoef(x, y)[0, 1]) if len(x) > 2 else float("nan")
-        return {"pearson_r": r, "mean_abs_diff_pct": float(np.mean(np.abs(x - y) / ((x + y) / 2)))}
 
-    model = [
-        float(sum(c.score >= t for c in v.candidates))
-        for v, t in zip(videos, thresholds, strict=True)
-    ]
-    raters = sorted(videos[0].rater_counts)
-    per_rater = {rater: compare(model, [v.rater_counts[rater] for v in videos]) for rater in raters}
-    pairs = {
-        f"{a}~{b}": compare(
-            [v.rater_counts[a] for v in videos], [v.rater_counts[b] for v in videos]
-        )
-        for a, b in combinations(raters, 2)
+def compare(a: list[float], b: list[float]) -> dict[str, float]:
+    """ICC, Pearson r, and the mean absolute difference as a share of the pair's mean count."""
+    x, y = np.array(a), np.array(b)
+    return {
+        "icc": icc(a, b),
+        "pearson_r": float(np.corrcoef(x, y)[0, 1]),
+        "mean_abs_diff_pct": float(np.mean(np.abs(x - y) / np.maximum((x + y) / 2, 1))),
     }
 
-    def mean(group: dict[str, dict[str, float]], key: str) -> float:
-        return float(np.mean([g[key] for g in group.values()]))
+
+def count_agreement(videos: list[Video], thresholds: list[float]) -> dict[str, Any]:
+    """Per-video rear counts against each rater, and each pair of raters against each other.
+    Three ways to count from the candidates: those scoring at least the video's threshold (the
+    scorer's count), all of them, and the sum of their scores."""
+    counts = {
+        "scorer": [
+            float(sum(c.score >= t for c in v.candidates))
+            for v, t in zip(videos, thresholds, strict=True)
+        ],
+        "candidates": [float(len(v.candidates)) for v in videos],
+        "sum_of_scores": [sum(c.score for c in v.candidates) for v in videos],
+    }
+    raters = sorted(videos[0].rater_counts)
+    by_rater = {r: [float(v.rater_counts[r]) for v in videos] for r in raters}
+    against = {
+        name: {r: compare(model, by_rater[r]) for r in raters} for name, model in counts.items()
+    }
+    pairs = {f"{a}~{b}": compare(by_rater[a], by_rater[b]) for a, b in combinations(raters, 2)}
+
+    def mean(group: dict[str, dict[str, float]]) -> dict[str, float]:
+        keys = ("icc", "pearson_r", "mean_abs_diff_pct")
+        return {k: float(np.mean([g[k] for g in group.values()])) for k in keys}
 
     return {
         "per_video": {
-            v.video_id: {"scorer": m, **v.rater_counts} for v, m in zip(videos, model, strict=True)
+            v.video_id: {name: c[i] for name, c in counts.items()} | v.rater_counts
+            for i, v in enumerate(videos)
         },
-        "scorer_vs_rater": per_rater,
+        "against_raters": against,
         "rater_vs_rater": pairs,
-        "mean": {
-            "scorer_vs_rater": {k: mean(per_rater, k) for k in ("pearson_r", "mean_abs_diff_pct")},
-            "rater_vs_rater": {k: mean(pairs, k) for k in ("pearson_r", "mean_abs_diff_pct")},
-        },
+        "mean": {f"{name}_vs_rater": mean(g) for name, g in against.items()}
+        | {"rater_vs_rater": mean(pairs)},
     }
 
 
@@ -250,7 +271,10 @@ def eval_split() -> None:
     held_out: list[str] = json.loads(SPLIT.read_text())["eval"]
     # The count threshold set on the train split by `fit`, as the settings carry none.
     threshold: float = json.loads((OUT / "fit.json").read_text())["count_threshold"]
-    videos = load([v for v in held_out if (RUNS / f"{v}.run").exists()], settings)
+    missing = [v for v in held_out if not (RUNS / f"{v}.run").exists()]
+    if missing:
+        raise SystemExit(f"eval videos not tracked yet: {missing}; run `track` first")
+    videos = load(held_out, settings)
     summary = {
         "settings_version": settings.version,
         "scorer": settings.rear_scorer.model_dump(),
