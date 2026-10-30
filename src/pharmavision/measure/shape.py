@@ -52,7 +52,8 @@ def _elongation(rle: str, height: int, width: int) -> float | None:
     (var_x, cov), (_, var_y) = np.cov(np.stack([cols, rows]).astype(np.float64)).tolist()
     spread = float(np.hypot((var_x - var_y) / 2, cov))
     major, minor = (var_x + var_y) / 2 + spread, (var_x + var_y) / 2 - spread
-    return float(np.sqrt(major / minor)) if minor > 0 else None
+    # Relative, as collinear pixels leave rounding error, not zero, in the minor axis.
+    return float(np.sqrt(major / minor)) if minor > 1e-9 * major else None
 
 
 def _mask_change(before_rle: str, after_rle: str, height: int, width: int) -> float:

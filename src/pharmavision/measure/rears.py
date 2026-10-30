@@ -24,9 +24,9 @@ def rear_candidates(
     """One value per frame in each sequence, None where it is unknown; an unknown speed means
     the position is unknown (a kept gap). A candidate frame has its area at least
     `rear_area_drop` below its baseline, its elongation at least `rear_elongation_change` away
-    from its baseline either way, and a speed of at most `rear_max_speed_cm_s`. Candidate frames
-    less than `rear_merge_s` apart join one window unless a kept gap lies between them, and
-    windows shorter than `rear_min_s` are dropped."""
+    from its baseline either way, and a speed of at most `rear_max_speed_cm_s`. A break of less
+    than `rear_merge_s` between candidate frames joins them into one window unless a speed in
+    the break is unknown, and windows shorter than `rear_min_s` are dropped."""
     window = max(1, round(settings.rear_baseline_s * fps)) | 1  # odd, so it centres on a frame
     area_baseline = _running_median(areas_px, window)
     elongation_baseline = _running_median(elongations, window)
@@ -59,7 +59,9 @@ def rear_candidates(
 
 def _running_median(values: Sequence[float | None], window: int) -> list[float]:
     """The median of the known values within `window // 2` frames either side of each frame;
-    NaN where none is known, which fails every comparison."""
+    NaN where none is known, which fails every comparison. Unlike the trajectory's filter it
+    reaches across gaps: it estimates the animal's usual size, not its path. Rearing must fill
+    less than half the window, or the baseline becomes the rear."""
     x = np.array([np.nan if v is None else v for v in values], dtype=np.float64)
     padded = np.pad(x, window // 2, constant_values=np.nan)
     with warnings.catch_warnings():

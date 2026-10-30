@@ -194,7 +194,8 @@ class Recall:
 
 def rear_recall(rears: list[Rear], windows: list[tuple[float, float]]) -> Recall:
     """Rears against candidate windows, both in seconds. A rear is found when some window
-    overlaps it for a non-zero time; touching at an end is not enough."""
+    overlaps it for a non-zero time; touching at an end is not enough. Overlap, not
+    containment, because stage 5 judges a 2-4 s clip cut around each window, not the window."""
 
     def overlaps(r: Rear, window: tuple[float, float]) -> bool:
         return min(r.end, window[1]) > max(r.start, window[0])

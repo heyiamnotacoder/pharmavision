@@ -268,10 +268,27 @@ the demo and write-up, the same way PaedScale published its validation table.
    settings v2); recall not yet measured.** `python -m spike.rear_recall [setting=value ...]`
    tracks the 6 train videos once (about $11 of SAM 3.1, cached), then counts the labelled rears
    that some candidate window overlaps, per rater, pooled and for consensus rears, and how many
-   windows overlap a rear. Re-running with other thresholds costs nothing. Record the result
-   here and tune the defaults before T5b. **Rule:** stage 5 can only label rears that a candidate
-   window contains, so recall bounds rearing recall; aim for consensus recall ≥ 0.9 with the
-   candidates covering well under half of the video time.
+   windows overlap a rear. Overlap, not containment, because stage 5 judges a 2–4 s clip cut
+   around each window. Re-running with other thresholds costs nothing. Record the result here
+   and tune the defaults before T5b.
+
+   Count check without labels (cloud, Oct 30), on the committed OFT_16 track (9,142 frames;
+   the measure stage takes 21 s): the first defaults (area drop 0.2, elongation change 0.15,
+   5 cm/s) gave 21 windows over 2% of the video, against about 85 rears per rater per video in
+   the labels (5,093 rear rows / 20 videos / 3 raters). Recall-first defaults (0.1, 0.1,
+   10 cm/s) give 110 windows over 16% of the time, mean 0.9 s. At the `fps: 15` clip price
+   (about $0.016, open decision 3) that is about $1.80 of Muse Spark per video.
+
+   | Area drop | Elongation change | Max speed | Windows | Time |
+   |---|---|---|---|---|
+   | 0.2 | 0.15 | 5 cm/s | 21 | 2.0% |
+   | 0.15 | 0.15 | 10 cm/s | 61 | 6.8% |
+   | 0.1 | 0.15 | 10 cm/s | 100 | 12.4% |
+   | **0.1** | **0.1** | **10 cm/s** | **110** | **15.8%** |
+
+   **Proposed rule (owner to confirm):** stage 5 can only label rears that some candidate's
+   clip shows, so candidate recall bounds rearing recall. Aim for consensus recall ≥ 0.9 with
+   the candidates covering well under half of the video time.
 3. **Muse Spark on short clips. Measured Oct 30; label set decided: binary rearing / none.**
    `python -m spike.muse_clips [fps]` asked `muse-spark-1.3-contributor` (zero-shot, whole-frame
    928×576 clips, no mask overlay) about 20 train-split clips: 8 supported and 8 unsupported rears

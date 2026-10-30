@@ -382,6 +382,7 @@ REAR = range(25, 40)  # 1 s
 
 
 def rears_in(episode: range) -> Callable[[int], tuple[float, float]]:
+    """The walking body, with the rear's body in the `episode` frames."""
     return lambda i: (8.0, 4.0) if i in episode else WALKING_BODY
 
 

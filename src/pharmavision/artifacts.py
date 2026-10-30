@@ -80,16 +80,18 @@ class MeasureSettings(Artifact):
     """The animal's usual mask area and elongation at each frame: their running median over
     this window, centred on the frame. Local, not one value per trial, because the wide-angle
     lens changes the animal's apparent size across the arena."""
-    rear_area_drop: float = Field(default=0.2, gt=0, lt=1)
+    rear_area_drop: float = Field(default=0.1, gt=0, lt=1)
     """Rear candidate frame: the mask area is at least this fraction below its baseline, ..."""
-    rear_elongation_change: float = Field(default=0.15, gt=0)
+    rear_elongation_change: float = Field(default=0.1, gt=0)
     """... the elongation (major over minor axis) differs from its baseline by at least this
     fraction, either way, ..."""
-    rear_max_speed_cm_s: float = Field(default=5.0, ge=0)
-    """... and the centroid moves slower than this."""
+    rear_max_speed_cm_s: float = Field(default=10.0, ge=0)
+    """... and the centroid moves at most this fast. The defaults favour recall (about 110
+    windows over 16% of the time on Sturman OFT_16): stage 5 judges every candidate, but can
+    never find a rear that no candidate holds."""
     rear_merge_s: float = Field(default=0.5, ge=0)
-    """Candidate frames separated by less than this join one window, unless a kept gap lies
-    between them, so a flickering rear is one candidate, not several."""
+    """A break of less than this between candidate frames joins them into one window, unless
+    the position is unknown somewhere in the break, so a flickering rear is one candidate."""
     rear_min_s: float = Field(default=0.2, ge=0)
     """A candidate window lasts at least this long."""
 

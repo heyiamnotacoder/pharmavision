@@ -67,6 +67,7 @@ def scores(rears: list[Rear], windows: list[tuple[float, float]]) -> dict[str, R
 
 
 def total(recalls: list[Recall]) -> dict[str, Any]:
+    """The per-video counts summed over videos, with the recall of the sums."""
     summed = Recall(*(sum(getattr(r, f) for r in recalls) for f in Recall.__dataclass_fields__))
     return asdict(summed) | {"recall": summed.recall}
 
