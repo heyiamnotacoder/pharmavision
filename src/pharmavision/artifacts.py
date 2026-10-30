@@ -4,10 +4,11 @@ between stages, and every read validates against it."""
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
+from typing import Literal, get_args
 
 import pyarrow as pa
 import pyarrow.parquet as pq
+import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .judge import HandSighting, QcVerdict, RearLabel
@@ -447,6 +448,208 @@ class Qc(Artifact):
         return any(e.scope == "trial" for e in self.exclusions)
 
 
+MetricName = Literal[
+    "distance_travelled_cm",
+    "mean_velocity_cm_s",
+    "centre_time_s",
+    "centre_entries",
+    "thigmotaxis",
+    "immobility_s",
+]
+"""The `Metrics` fields the stats compare between groups. No rear count: there is none to
+compare (ADR 0003)."""
+METRICS: tuple[MetricName, ...] = get_args(MetricName)
+METRIC_UNITS: dict[MetricName, str] = {
+    "distance_travelled_cm": "cm",
+    "mean_velocity_cm_s": "cm/s",
+    "centre_time_s": "s",
+    "centre_entries": "entries",
+    "thigmotaxis": "fraction",
+    "immobility_s": "s",
+}
+
+
+class DoseGroup(Artifact):
+    """One group of a study: the animals given one treatment at one dose."""
+
+    name: str
+    treatment: str
+    dose: float = Field(ge=0)
+    dose_unit: str
+
+
+class StudyTrial(Artifact):
+    """One trial of a study: the run that scored it, the code the scorer saw instead of the
+    group, and the group it was in."""
+
+    run_id: str
+    blinding_code: str
+    group: str
+
+
+class StudyDesign(Artifact):
+    """`study.yaml`: the groups, the trials and which group each trial was in."""
+
+    name: str
+    groups: list[DoseGroup] = Field(min_length=2)
+    """In order: the first is the reference (usually the vehicle) that differences are taken
+    from, and pairs are compared in this order."""
+    trials: list[StudyTrial]
+
+    @model_validator(mode="after")
+    def _trials_name_known_groups_once(self) -> "StudyDesign":
+        names = [g.name for g in self.groups]
+        for kind, values in (
+            ("group name", names),
+            ("run", [t.run_id for t in self.trials]),
+            ("blinding code", [t.blinding_code for t in self.trials]),
+        ):
+            repeated = sorted({v for v in values if values.count(v) > 1})
+            if repeated:
+                raise ValueError(f"repeated {kind}: {', '.join(repeated)}")
+        unknown = sorted({t.group for t in self.trials} - set(names))
+        if unknown:
+            raise ValueError(f"trials in unknown groups: {', '.join(unknown)}")
+        return self
+
+
+class TrialRow(Artifact):
+    """One trial's metrics, its group, and every exclusion QC made in it."""
+
+    run_id: str
+    blinding_code: str
+    group: str
+    values: dict[MetricName, float | None]
+    """None: the metric could not be computed, never zero."""
+    exclusions: list[Exclusion]
+
+    @property
+    def excluded(self) -> bool:
+        return any(e.scope == "trial" for e in self.exclusions)
+
+
+class TrialTable(Artifact):
+    """`trials.json`: the per-trial metrics table, one row per trial of the design, in its
+    order. Excluded trials stay in it with their reasons; the stats leave them out."""
+
+    trials: list[TrialRow]
+
+
+class StatsSettings(Artifact):
+    """Every threshold the test-selection rule uses."""
+
+    version: int = 1
+    """Bump when a default, the rule or an effect size's definition changes."""
+    normality_alpha: float = Field(default=0.05, gt=0, lt=1)
+    """A group is taken as normal when its Shapiro-Wilk p is above this."""
+    variance_alpha: float = Field(default=0.05, gt=0, lt=1)
+    """Variances are taken as equal when Levene's p (median-centred) is above this."""
+    ci_level: float = Field(default=0.95, gt=0, lt=1)
+    min_group_n: int = Field(default=3, ge=3)
+    """With fewer trials left in any group the rule abstains: Shapiro-Wilk needs 3."""
+    bootstrap_resamples: int = Field(default=9999, ge=100)
+    """For the one effect size with no closed-form interval, Kruskal-Wallis's epsilon²."""
+    bootstrap_seed: int = 0
+    """Fixed, so the same table gives the same interval."""
+
+
+TestName = Literal[
+    "student_t", "welch_t", "mann_whitney_u", "anova", "welch_anova", "kruskal_wallis"
+]
+PosthocName = Literal["tukey_hsd", "games_howell", "dunn"]
+EffectName = Literal["mean_difference", "rank_biserial", "eta_squared", "epsilon_squared"]
+
+
+class GroupSummary(Artifact):
+    """One group's values of one metric, over the trials the test used."""
+
+    group: str
+    n: int
+    """Trials analysed: not excluded, and with the metric known."""
+    n_excluded: int
+    """Trials left out by a trial exclusion."""
+    n_missing: int
+    """Trials kept whose metric could not be computed."""
+    mean: float | None
+    sd: float | None
+    """Sample standard deviation (n - 1); None under 2 trials."""
+    median: float | None
+
+
+class NormalityCheck(Artifact):
+    """Shapiro-Wilk on one group's values."""
+
+    group: str
+    w: float
+    p: float
+
+
+class VarianceCheck(Artifact):
+    """Levene's test across the groups, median-centred (Brown-Forsythe)."""
+
+    statistic: float
+    p: float
+
+
+class EffectSize(Artifact):
+    """How large the difference is, with its confidence interval at `StatsSettings.ci_level`.
+    `mean_difference` is in the metric's unit, later group minus the reference;
+    `rank_biserial` is positive when the later group's values tend to be larger."""
+
+    name: EffectName
+    estimate: float
+    ci_low: float
+    ci_high: float
+
+
+class PairwiseComparison(Artifact):
+    """One post-hoc pair after a test of 3 or more groups: `difference` is `group_b` minus
+    `group_a` (in mean ranks for Dunn's test, which gives no interval), and `p_adjusted` is
+    adjusted for the number of pairs."""
+
+    group_a: str
+    group_b: str
+    difference: float
+    statistic: float
+    p_adjusted: float
+    ci_low: float | None
+    ci_high: float | None
+
+
+class Comparison(Artifact):
+    """The test the rule chose for one metric and what it gave."""
+
+    test: TestName
+    statistic: float
+    """t, U (the later group's), F or H, following the test."""
+    df: tuple[float, ...]
+    """Degrees of freedom: one for t and H, two for F, none for U."""
+    p: float
+    effect: EffectSize
+    posthoc: PosthocName | None = None
+    pairwise: list[PairwiseComparison] = []
+
+
+class MetricStats(Artifact):
+    """One metric compared between the groups: the checks the rule read, why it chose the test
+    it did, and the result. `comparison` None: the rule abstained, and `reason` says why."""
+
+    metric: MetricName
+    unit: str
+    groups: list[GroupSummary]
+    normality: list[NormalityCheck]
+    variance: VarianceCheck | None
+    reason: str
+    comparison: Comparison | None
+
+
+class StudyStats(Artifact):
+    """`stats.json`: every metric compared, and the settings the rule used."""
+
+    settings: StatsSettings
+    metrics: list[MetricStats]
+
+
 @dataclass(frozen=True)
 class RunFolder:
     """One run's folder on disk, with typed reads and writes for each artifact."""
@@ -508,6 +711,39 @@ class RunFolder:
 
     def write_qc(self, qc: Qc) -> None:
         self._write("qc.json", qc)
+
+    def _read[A: Artifact](self, name: str, kind: type[A]) -> A:
+        return kind.model_validate_json((self.path / name).read_text())
+
+    def _write(self, name: str, artifact: Artifact) -> None:
+        (self.path / name).write_text(artifact.model_dump_json(indent=2) + "\n")
+
+
+class StudyNotReadyError(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True)
+class StudyFolder:
+    """One study's folder: its design (`study.yaml`, written by the scientist), the per-trial
+    metrics table and the stats."""
+
+    path: Path
+
+    def design(self) -> StudyDesign:
+        return StudyDesign.model_validate(yaml.safe_load((self.path / "study.yaml").read_text()))
+
+    def trials(self) -> TrialTable:
+        return self._read("trials.json", TrialTable)
+
+    def write_trials(self, table: TrialTable) -> None:
+        self._write("trials.json", table)
+
+    def stats(self) -> StudyStats:
+        return self._read("stats.json", StudyStats)
+
+    def write_stats(self, stats: StudyStats) -> None:
+        self._write("stats.json", stats)
 
     def _read[A: Artifact](self, name: str, kind: type[A]) -> A:
         return kind.model_validate_json((self.path / name).read_text())
