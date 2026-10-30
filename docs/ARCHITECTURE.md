@@ -144,7 +144,8 @@ This is the most heavily tested module.
 | Thigmotaxis | Fraction of frames with a known position within `thigmotaxis_wall_cm` of the floor-polygon edge (or beyond it). |
 | Immobility | Mask change between consecutive frames, 1 − IoU on the stored RLE. A bout is a stretch of changes below `immobility_change_max`; k of them join k + 1 frames, and the bout counts if those frames last at least `immobility_min_s`. |
 | Freezing | Velocity and mask change both below threshold for ≥ the minimum duration. |
-| Rear candidates | Rule-based windows, listed in `metrics.json` as `rear_candidates` (first and last frame). A candidate frame has a mask area at least `rear_area_drop` below its baseline, an elongation (major over minor axis, from the mask's second moments) at least `rear_elongation_change` away from its baseline either way, and a centroid speed of at most `rear_max_speed_cm_s`. Each baseline is a running median over `rear_baseline_s` centred on the frame, because the wide-angle lens changes the apparent size of the animal across the arena. A break of less than `rear_merge_s` between candidate frames joins them into one window unless the position is unknown somewhere in the break; windows shorter than `rear_min_s` are dropped. These are *candidates* for stage 5, not results. |
+| Rear candidates | Rule-based windows, listed in `metrics.json` as `rear_candidates` (first and last frame, with their features and score: next row). A candidate frame has a mask area at least `rear_area_drop` below its baseline, an elongation (major over minor axis, from the mask's second moments) at least `rear_elongation_change` away from its baseline either way, and a centroid speed of at most `rear_max_speed_cm_s`. Each baseline is a running median over `rear_baseline_s` centred on the frame, because the wide-angle lens changes the apparent size of the animal across the arena. A break of less than `rear_merge_s` between candidate frames joins them into one window unless the position is unknown somewhere in the break; windows shorter than `rear_min_s` are dropped. These are *candidates* for stage 5, not results. |
+| Rear score | Each candidate carries its features (`RearFeatures`: duration, deepest and mean area drop below baseline, largest elongation change, mean speed, mean mask area in cm²) and a score: the logistic of `MeasureSettings.rear_scorer`'s intercept plus each feature times its weight, fitted on the train split by `spike.rear_scorer` and versioned with the settings (v4). Evidence per window only: **no rear count is made**, because no count from it agrees with the raters ([ADR 0003](adr/0003-no-rear-counts-score-as-evidence.md)). |
 
 Every threshold is a named parameter in a versioned `MeasureSettings`, recorded in the manifest
 when the run starts, with distances in cm and times in seconds (the filter window is in frames).
@@ -190,9 +191,10 @@ purity.
   event under `BehaviourSettings.min_confidence`
   (0.6) is marked `low_confidence` and reported as such. The settings are versioned in the
   manifest.
-- **Measured Oct 30 (open decision 3): Muse Spark labels are not trusted for rear counts,**
-  zero-shot or few-shot. No rear count comes from the events labelled `rearing`: until a
-  measured rear scorer replaces or gates them, the report abstains on rear counts.
+- **Muse Spark is a second opinion (open decision 3, ADRs 0002 and 0003).** Its labels are not
+  trusted, zero-shot or few-shot. Each event keeps its label and rationale beside the
+  candidate's measured score, shown per window. **The pipeline makes no rear count**, and the
+  report abstains on rearing counts, citing the eval.
 
 ### 6. QC (measures, then judges)
 - Deterministic flags (`measure/qc.py`, T6a), on the raw track, with every threshold in a
@@ -238,6 +240,8 @@ purity.
   against the tool outputs, with a rounding tolerance. Any unmatched number fails the report and
   the agent is re-prompted with the list of offending numbers. After 2 failures the report ships
   with those sentences struck out and flagged.
+- Rearing counts: the agent states that the pipeline does not count rears and why (ADR 0003);
+  `get_events_summary` gives the number of candidate windows, never a rear count.
 
 ## Evaluation harness
 
@@ -264,7 +268,7 @@ purity.
 | What | Reference | Metric | Pass bar |
 |---|---|---|---|
 | Tracking | DeepLabCut output (reference, not truth) | Centroid distance to DLC body centre (cm), % frames tracked | Report it; check large disagreements by eye |
-| Rearing (OFT) | 3 human raters, 20 videos | Per-video count ICC vs each rater; event-level F1 with ± tolerance; supported vs unsupported | Agreement with humans within the human–human range |
+| Rearing (OFT) | 3 human raters, 20 videos | Per-video count ICC vs each rater; event-level F1 with ± tolerance; supported vs unsupported | Agreement with humans within the human–human range. **Not met (Oct 31):** count ICC 0.05 on the eval split against 0.90 between raters, so the pipeline makes no count ([ADR 0003](adr/0003-no-rear-counts-score-as-evidence.md)) |
 | Floating (FST, stretch) | Human raters, 10 videos | Immobility time vs each rater | Within the human–human range |
 | Head dips (EPM, stretch) | 3 raters, 5 videos | Count agreement | Report only, n is too small for a claim |
 | Report | Computed tables | Number-audit pass rate | 100% |
@@ -422,7 +426,33 @@ the demo and write-up, the same way PaedScale published its validation table.
    measured scorer on the mask features (measures layer), fitted on the train split and checked
    on the eval split (tracked now, about $25). Muse Spark stays as a second opinion: its label
    and rationale stay on each event and the eval reports its agreement, but it never sets the
-   count.
+   count. (The count part is superseded by ADR 0003, below.)
+
+   **The measured scorer (laptop, Oct 31).** `python -m spike.rear_scorer track | fit | eval`.
+   Every candidate (settings v4) is labelled from the raters: a rear when it overlaps a
+   consensus rear, not a rear when no rater marked a rear within 1 s of it, and left out
+   otherwise (so the negatives are clean ones, which flatters κ and precision); a ridge logistic regression over its 6 features is fitted on the 6 train
+   videos, scored leave-one-video-out, then the fitted defaults run on the 14 eval videos
+   (tracked for this, about $25; OFT_12 and OFT_52 took the floor prompt "white floor", OFT_39
+   "floor", and px/cm stayed within 7.26–7.45 on all 20 videos). Counts use a threshold set on
+   the train split's counts (0.55).
+
+   | | Train, leave-one-video-out (900 candidates) | Eval split (2,056 candidates) |
+   |---|---|---|
+   | Per candidate | AUC 0.75, κ 0.37, precision 0.74, recall 0.67 | AUC 0.71, κ 0.29, precision 0.66, recall 0.74 |
+   | Per-video count against the raters: ICC(2,1), Pearson r, mean abs. difference | 0.57, 0.53, 21% | **0.05, 0.07, 29%** |
+   | Raters against each other | 0.97, 0.98, 6% | 0.90, 0.90, 9% |
+   | Counting all candidates instead: ICC, r | 0.02, 0.34 | 0.02, 0.41 |
+   | Summing the scores instead: ICC, r | 0.33, 0.44 | 0.11, 0.22 |
+
+   Adding the mean mask area in cm² lifted the leave-one-video-out AUC from 0.70 to 0.75; a log
+   duration added nothing. Windows rarely hold two consensus rears (2–11 per video), so the
+   counts don't fail on merging: the errors are video-specific (OFT_23: 149 counted, the raters
+   about 47).
+
+   **Rule ([ADR 0003](adr/0003-no-rear-counts-score-as-evidence.md)):** the pipeline makes no
+   rear count; the score and Muse Spark's label stay as per-window evidence, and FR-6 is
+   reported as not met.
 4. **Frontend stack. Decided Oct 29:** Vite + React + TypeScript (strict), because the overlay and
    zone editor are the demo.
 5. **Python environment. Decided Oct 29:** `uv`, Python 3.12, `ruff` everywhere, `pyright` strict on

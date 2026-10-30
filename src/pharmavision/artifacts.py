@@ -62,11 +62,38 @@ class ArenaSettings(Artifact):
     """CLAHE equalises the frame as a grid of this many by this many tiles."""
 
 
+class RearFeatures(Artifact):
+    """What the mask did over a rear candidate's window, relative to the animal's usual size
+    and shape there (the `rear_baseline_s` running medians)."""
+
+    duration_s: float
+    area_drop: float
+    """The deepest drop of the mask area below its baseline, as a fraction (0.4: 40% smaller)."""
+    mean_area_drop: float
+    """The mean drop over the window."""
+    elongation_change: float
+    """The largest change of the elongation from its baseline, either way, as a fraction."""
+    mean_speed_cm_s: float
+    mean_area_cm2: float
+    """The mean mask area: a rearing animal seen from above looks smaller."""
+
+
+class RearScorer(Artifact):
+    """A logistic score over a candidate's features, fitted on the train split's rater labels:
+    1 / (1 + exp(-(intercept + sum of weight x feature))). Evidence per candidate only: summed
+    or thresholded, it does not give a per-video rear count that agrees with the raters, so no
+    count is made from it (ADR 0003)."""
+
+    intercept: float
+    weights: RearFeatures
+    """One weight per feature, in that feature's units."""
+
+
 class MeasureSettings(Artifact):
     """Every threshold the measure stage uses. Times are in seconds and distances in cm, so a
     setting means the same at any fps or frame size."""
 
-    version: int = 3
+    version: int = 4
     """Bump when a default or a metric's definition changes, so metrics from different versions
     are never compared as if alike."""
     median_window_frames: int = Field(default=5, ge=1)
@@ -102,6 +129,19 @@ class MeasureSettings(Artifact):
     the position is unknown somewhere in the break, so a flickering rear is one candidate."""
     rear_min_s: float = Field(default=0.1, ge=0)
     """A candidate window lasts at least this long."""
+    rear_scorer: RearScorer = RearScorer(
+        intercept=3.74,
+        weights=RearFeatures(
+            duration_s=0.4837,
+            area_drop=5.129,
+            mean_area_drop=-7.986,
+            elongation_change=0.5375,
+            mean_speed_cm_s=-0.06692,
+            mean_area_cm2=-0.1449,
+        ),
+    )
+    """Fitted on the 6 train videos by `python -m spike.rear_scorer fit` (ADR 0003): longer
+    windows with a deeper but brief area drop and a smaller mask score higher."""
 
     @model_validator(mode="after")
     def _median_window_is_odd(self) -> "MeasureSettings":
@@ -271,6 +311,9 @@ class RearCandidate(Artifact):
 
     first_frame: int
     last_frame: int
+    features: RearFeatures
+    score: float = Field(ge=0, le=1)
+    """`MeasureSettings.rear_scorer` on the features: how likely the window holds a rear."""
 
 
 class Metrics(Artifact):
@@ -290,7 +333,7 @@ class Metrics(Artifact):
 class BehaviourEvent(Artifact):
     """One judged rear candidate over frames `first_frame` to `last_frame` (inclusive): the
     candidate's own window, though the model saw a clip around it. Every candidate gets one, so
-    each verdict is auditable; a rear count is the events labelled "rearing". For a window
+    each verdict is auditable; it is a second opinion, never counted (ADR 0003). For a window
     longer than `BehaviourSettings.clip_max_s` the model saw only its middle: rears last about
     a second, so the label stands for the window."""
 
