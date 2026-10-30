@@ -1,0 +1,34 @@
+[
+  {
+    "video_id": "OFT_58",
+    "start_s": 130.8,
+    "end_s": 133.467,
+    "clip": "OFT_58_130.800.mp4",
+    "label": "rearing",
+    "rationale": "The mouse walks to the wall and stops, its head and forebody rise out of view up the wall so the outline shrinks to the hindquarters for about a second, then it drops back and walks along the wall at full length."
+  },
+  {
+    "video_id": "OFT_44",
+    "start_s": 110.533,
+    "end_s": 112.533,
+    "clip": "OFT_44_110.533.mp4",
+    "label": "none",
+    "rationale": "The mouse turns at the wall, bending its body into a curve with the head swinging back toward the tail, but the outline stays about as large as when it walks and the head never rises, so this is a turn, not a rear."
+  },
+  {
+    "video_id": "OFT_38",
+    "start_s": 217.8,
+    "end_s": 220.267,
+    "clip": "OFT_38_217.800.mp4",
+    "label": "rearing",
+    "rationale": "The mouse stops in the open and sits up: the outline shrinks to a small round head-and-shoulders shape with the tail trailing straight behind, holds for about a second, then lengthens as the mouse drops."
+  },
+  {
+    "video_id": "OFT_58",
+    "start_s": 93.6,
+    "end_s": 95.6,
+    "clip": "OFT_58_93.600.mp4",
+    "label": "none",
+    "rationale": "The mouse turns round on the spot by the wall, so for a moment it points toward the camera and looks compact, but its outline keeps its walking size and it keeps rotating instead of standing up."
+  }
+]

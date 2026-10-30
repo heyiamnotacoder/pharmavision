@@ -20,6 +20,9 @@ from ..model_api import OpenAiTransport, Request, ResponsesTransport
 from ..model_cache import Event, ResponseCache, input_hash
 from . import Clip, ClipJudgement, RearLabel
 
+MAX_VIDEOS = 5
+"""Videos the Model API takes in one request (a 400 above it, checked live Oct 30)."""
+
 PROMPT_VERSION = "clip-v1"
 """The request shape and wording: bump it when either changes."""
 
@@ -74,6 +77,25 @@ class FewShotExample(BaseModel):
     rationale: str
 
 
+FEW_SHOT_DIR = Path(__file__).parent / "few_shot"
+"""The committed few-shot set: `examples.json` (clip references and labels) and the clips, cut
+from the train split's run folders by `python -m spike.muse_few_shot build`."""
+
+
+def few_shot_examples(directory: Path = FEW_SHOT_DIR) -> tuple[FewShotExample, ...]:
+    """The few-shot set in `directory`, in the order the model sees it."""
+    entries = json.loads((directory / "examples.json").read_text())
+    return tuple(
+        FewShotExample(
+            video_id=e["video_id"],
+            clip=directory / e["clip"],
+            label=e["label"],
+            rationale=e["rationale"],
+        )
+        for e in entries
+    )
+
+
 class MuseSparkSettings(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -87,7 +109,8 @@ class MuseSparkSettings(BaseModel):
     input_fps: int | None = Field(default=15, gt=0)
     """`input_video` sampling. At 15 fps (every frame) Muse Spark agreed with the raters more
     than at its default rate, for about 7 times the tokens (T2). None leaves it to the API."""
-    few_shot: tuple[FewShotExample, ...] = ()
+    few_shot: tuple[FewShotExample, ...] = Field(default=(), max_length=MAX_VIDEOS - 1)
+    """Labelled clips shown ahead of each clip; with the clip judged, at most `MAX_VIDEOS`."""
     split_file: Path = Path("eval/split.json")
     """The fixed train/eval split; every few-shot example must come from its train videos."""
 
@@ -117,6 +140,11 @@ class MuseSparkJudge:
         return self.settings.model
 
     def classify_clip(self, clip: Clip) -> ClipJudgement:
+        return _parse(self.response(clip))
+
+    def response(self, clip: Clip) -> list[Event]:
+        """The clip's response as its raw event stream, usage included: from the cache, or else
+        from one API call, cached once it parses as a judgement."""
         digest = input_hash(
             "clip",
             PROMPT,
@@ -128,12 +156,12 @@ class MuseSparkJudge:
         model = self.settings.model
         cached = self.cache.get(model, PROMPT_VERSION, digest)
         if cached is not None:
-            return _parse(cached)
+            return cached
         request = self._request(_data_url(clip.video.read_bytes()))
         stream = list(self.transport.stream(request))
-        judgement = _parse(stream)
+        _parse(stream)
         self.cache.put(model, PROMPT_VERSION, digest, stream)
-        return judgement
+        return stream
 
     def _request(self, clip_url: str) -> Request:
         """The prompt and the first clip in the first user turn, the shape T2 measured; each
