@@ -415,6 +415,15 @@ def test_walking_gives_no_rear_candidate(
     assert run.metrics().rear_candidates == []
 
 
+def test_standing_still_with_the_usual_body_gives_no_rear_candidate(
+    tmp_path: Path, runs_dir: Path
+) -> None:
+    # Still for 2 s, under every speed limit: only the mask can rule it out.
+    run = finished_run(tmp_path, runs_dir, walk_stop_walk, body=lambda _: WALKING_BODY)
+
+    assert run.metrics().rear_candidates == []
+
+
 def test_the_rear_thresholds_come_from_the_runs_measure_settings(
     tmp_path: Path, runs_dir: Path
 ) -> None:

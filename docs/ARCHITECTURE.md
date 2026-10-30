@@ -295,8 +295,7 @@ the demo and write-up, the same way PaedScale published its validation table.
    tracks the 6 train videos once (about $11 of SAM 3.1, cached), then counts the labelled rears
    that some candidate window overlaps, per rater, pooled and for consensus rears, and how many
    windows overlap a rear. Overlap, not containment, because stage 5 judges a 2–4 s clip cut
-   around each window. Re-running with other thresholds costs nothing. Record the result here
-   and tune the defaults before T5b.
+   around each window. Re-running with other thresholds costs nothing.
 
    Count check without labels (cloud, Oct 30), on the committed OFT_16 track (9,142 frames;
    the measure stage takes 21 s): the first defaults (area drop 0.2, elongation change 0.15,
@@ -310,11 +309,11 @@ the demo and write-up, the same way PaedScale published its validation table.
    | 0.2 | 0.15 | 5 cm/s | 21 | 2.0% |
    | 0.15 | 0.15 | 10 cm/s | 61 | 6.8% |
    | 0.1 | 0.15 | 10 cm/s | 100 | 12.4% |
-   | **0.1** | **0.1** | **10 cm/s** | **110** | **15.8%** |
+   | 0.1 | 0.1 | 10 cm/s | 110 | 15.8% (v2) |
 
-   **Proposed rule (owner to confirm):** stage 5 can only label rears that some candidate's
-   clip shows, so candidate recall bounds rearing recall. Aim for consensus recall ≥ 0.9 with
-   the candidates covering well under half of the video time.
+   The goal set before measuring: stage 5 can only label rears that some candidate's clip
+   shows, so candidate recall bounds rearing recall. Aim for consensus recall ≥ 0.9 with the
+   candidates covering well under half of the video time.
 
    **Recall on the train split (laptop, Oct 30).** 6 videos, 503 consensus rears (at least two
    raters), equalised arenas (#27); SAM 3.1 tracking cost about $11. The three raters give
@@ -330,10 +329,15 @@ the demo and write-up, the same way PaedScale published its validation table.
 
    - **The area drop is the limit.** Only 78% of consensus rears have any frame with the mask
      10% below its baseline. Elongation (99.6%) and speed (100%) almost never exclude a rear.
-     Reaching 0.9 takes a 3% drop, close to mask noise.
+     Reaching 0.9 takes a 3% drop, and then the windows cover 41% of the time.
    - 45–51% of windows overlap a consensus rear at every setting above.
    - A longer baseline (30, 60, 120 s in place of 10 s) lowers recall at every area drop.
-   - So the rule meets the 0.9 target only at 41% of the time. "Well under half" is not met.
+   - The rows above come from `spike.rear_recall`. The per-rule reach and the baseline sweep
+     came from a one-off sweep over the same stored tracks, not kept in the repo.
+
+   **Rule:** measure settings v3 use the 0.91 row. Recall comes first; the candidates are a
+   coarse filter and stage 5 carries the precision. "Well under half the time" is dropped
+   (41%). More recall at less time needs a signal other than mask area, not more tuning.
 3. **Muse Spark on short clips. Measured Oct 30; label set decided: binary rearing / none.**
    `python -m spike.muse_clips [fps]` asked `muse-spark-1.3-contributor` (zero-shot, whole-frame
    928×576 clips, no mask overlay) about 20 train-split clips: 8 supported and 8 unsupported rears

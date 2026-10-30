@@ -26,5 +26,5 @@ ARCHITECTURE open decision 2.
 - The candidates miss the "well under half the time" goal: they are a coarse filter, and stage 5
   carries the precision (45–51% of windows overlap a consensus rear).
 - The area drop is the limit, not the thresholds: 22% of consensus rears never shrink the mask by
-  10%, and 0.03 is close to mask noise. Better recall at less time needs a different signal, not
-  further tuning.
+  10%, and at a 3% drop the windows cover 41% of the time. Better recall at less time needs a different
+  signal, not further tuning.

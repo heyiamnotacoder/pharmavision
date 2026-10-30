@@ -93,10 +93,9 @@ class MeasureSettings(Artifact):
     """... the elongation (major over minor axis) differs from its baseline by at least this
     fraction, either way, ..."""
     rear_max_speed_cm_s: float = Field(default=15.0, ge=0)
-    """... and the centroid moves at most this fast. The defaults favour recall: on the 6
-    Sturman train videos a candidate overlaps 91% of consensus rears, with about 180 windows
-    over 41% of the time (open decision 2). Stage 5 judges every candidate, but can never find
-    a rear that no candidate holds."""
+    """... and the centroid moves at most this fast. The defaults (v3) favour recall over clip
+    count, as measured in ARCHITECTURE open decision 2 and decided in ADR 0001: stage 5 judges
+    every candidate, but can never find a rear that no candidate holds."""
     rear_merge_s: float = Field(default=0.5, ge=0)
     """A break of less than this between candidate frames joins them into one window, unless
     the position is unknown somewhere in the break, so a flickering rear is one candidate."""
