@@ -28,6 +28,10 @@ _Avoid_: Alert, error, issue
 Frames, or a whole trial, left out of the statistics, with the reason and whether a rule or the model decided it. Every exclusion is listed; nothing is dropped silently.
 _Avoid_: Rejection, filter, drop
 
+**Review**:
+The models' look at one flagged window (a warning): SAM 3.1's "hand" and "glove" prompts on a few of its frames, then Muse Spark's verdict on a short clip around it: keep it, exclude the window, or exclude the trial, with a reason. Verdicts apply automatically and every one is listed, kept or not. Model review can be turned off, leaving the deterministic flags alone.
+_Avoid_: Approval, override (a human's, stretch goal FR-S6)
+
 **Rear candidate**:
 A window of frames where the animal may be rearing: its mask shrank and changed shape while it stayed in place. Found by rules in the measure stage, which also scores it (see rear score); the behaviours stage shows it to Muse Spark for a second opinion.
 _Avoid_: Rear, rearing event (for an unjudged window)

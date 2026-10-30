@@ -119,7 +119,10 @@ def run_stage(run: RunFolder, stage: Stage, segmenter: Segmenter, judge: Judge) 
             behaviours.run(run, judge)
             _record_model(run, "behaviours", judge.model_id)
         case Stage.QC:
-            qc.run(run)
+            qc.run(run, segmenter, judge)
+            if run.qc().reviews:
+                _record_model(run, "qc_hands", segmenter.model_id)
+                _record_model(run, "qc", judge.model_id)
 
 
 def _record_model(run: RunFolder, stage: str, model_id: str) -> None:

@@ -58,12 +58,16 @@ def finished_run(
     measure_settings: MeasureSettings | None = None,
     judge: Judge | None = None,
     behaviour_settings: BehaviourSettings | None = None,
+    segmenter: SyntheticSegmenter | None = None,
 ) -> RunFolder:
     """A run through every stage, on a 4 s video, with the animal at `trajectory(frame)`, its
     body an ellipse with semi-axes `body(frame)` (along x, along y), and a second, less
-    confident object at `intruder(frame)`. `judge` judges the rear candidates' clips."""
+    confident object at `intruder(frame)`. `judge` judges the rear candidates' clips and the
+    flagged windows. A `segmenter` given replaces the scene the other arguments describe."""
     video = make_video(tmp_path / "trial.mp4", seconds=4)
-    segmenter = SyntheticSegmenter(floor=FLOOR, trajectory=trajectory, body=body, intruder=intruder)
+    segmenter = segmenter or SyntheticSegmenter(
+        floor=FLOOR, trajectory=trajectory, body=body, intruder=intruder
+    )
     run = start_run(
         video,
         TEMPLATE,

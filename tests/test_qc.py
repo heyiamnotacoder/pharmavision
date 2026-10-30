@@ -119,7 +119,7 @@ def test_the_manifest_records_the_versioned_qc_thresholds_and_they_decide(
     )
 
     assert run.manifest().qc == lenient
-    assert run.manifest().qc.version == 1
+    assert run.manifest().qc.version == 2
     assert flagged(run.qc()) == [("tracking_loss", 20, 29, "warning")]
     assert "too long to interpolate" in run.qc().flags[0].reason
     assert run.qc().exclusions == []

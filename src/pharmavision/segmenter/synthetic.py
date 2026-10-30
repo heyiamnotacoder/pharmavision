@@ -2,7 +2,7 @@
 closed-form answer through the real pipeline."""
 
 import random
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
 
 import cv2
@@ -10,13 +10,15 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ..measure.geometry import Point
+from ..templates import OPEN_FIELD
 from . import FrameMasks, Mask
 
 _SHIFT = 4
 
 
 class SyntheticSegmenter:
-    """Ignores pixels and prompts: images always show `floor`, videos always show one animal
+    """Ignores pixels: images show `floor` to `floor_prompt` and `seen[prompt]` to any other
+    prompt (nothing to a prompt not in it). Videos ignore the prompt and show one animal
     at `trajectory(frame_index)`, an axis-aligned ellipse with semi-axes `body(frame_index)`
     (along x, along y), and a second, less confident and larger object (an intruding hand, a
     disc) at `intruder(frame_index)`. Like SAM 3.1, it skips frames where neither is there,
@@ -33,8 +35,12 @@ class SyntheticSegmenter:
         intruder: Callable[[int], Point | None] = lambda _: None,
         intruder_radius_px: float = 30.0,
         shuffle_seed: int | None = None,
+        floor_prompt: str = OPEN_FIELD.floor_prompt,
+        seen: Mapping[str, Sequence[Point]] | None = None,
     ) -> None:
         self.floor = floor
+        self.floor_prompt = floor_prompt
+        self.seen = seen or {}
         self.trajectory = trajectory
         self.body = body
         self.intruder = intruder
@@ -42,10 +48,11 @@ class SyntheticSegmenter:
         self.shuffle_seed = shuffle_seed
 
     def segment_image(self, image: NDArray[np.uint8], prompt: str) -> list[Mask]:
-        if not self.floor:
+        polygon = self.floor if prompt == self.floor_prompt else self.seen.get(prompt, ())
+        if not polygon:
             return []
         canvas = np.zeros(image.shape[:2], dtype=np.uint8)
-        cv2.fillPoly(canvas, [np.round(np.array(self.floor)).astype(np.int32)], color=1)
+        cv2.fillPoly(canvas, [np.round(np.array(polygon)).astype(np.int32)], color=1)
         return [Mask(canvas.astype(bool), confidence=1.0)]
 
     def track_video(self, video: Path, prompt: str, max_objects: int) -> Iterator[FrameMasks]:

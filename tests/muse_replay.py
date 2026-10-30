@@ -17,6 +17,11 @@ def answer(label: str, confidence: float = 0.9, rationale: str = "Rears up.") ->
     return responses_events([text])
 
 
+def verdict(verdict: str, reason: str) -> list[Event]:
+    """A completed stream whose output text is a QC review's JSON verdict, in one delta."""
+    return responses_events([json.dumps({"verdict": verdict, "reason": reason})])
+
+
 def videos_sent(request: Mapping[str, Any]) -> Iterator[Mapping[str, Any]]:
     """Every `input_video` part in a Responses request, in order."""
     for message in request["input"]:
