@@ -4,7 +4,7 @@ from ..artifacts import Arena, MeasureSettings, Metrics, NormalisedVideo, Track
 from .distance import distance_travelled_cm, mean_velocity_cm_s, speeds_cm_s
 from .geometry import signed_distance, signed_distance_per_frame
 from .immobility import immobility_s
-from .rears import rear_candidates
+from .rears import rear_candidates, rear_count
 from .shape import mask_changes, mask_elongations
 from .trajectory import clean_trajectory
 from .zones import zone_occupancy
@@ -34,6 +34,14 @@ def open_field_metrics(
     near_wall = [d <= wall_px for d in signed_distance(known, arena.floor_px)]
     rles = [f.mask_rle for f in track.frames]
     changes = mask_changes(rles, video.height, video.width)
+    candidates = rear_candidates(
+        [f.area_px if f.detected else None for f in track.frames],
+        mask_elongations(rles, video.height, video.width),
+        speeds_cm_s(trajectory.points, arena.px_per_cm, fps),
+        fps,
+        arena.px_per_cm,
+        settings,
+    )
     return Metrics(
         distance_travelled_cm=distance_travelled_cm(trajectory.points, arena.px_per_cm),
         mean_velocity_cm_s=mean_velocity_cm_s(trajectory.points, arena.px_per_cm, fps),
@@ -44,11 +52,6 @@ def open_field_metrics(
             changes, fps, settings.immobility_change_max, settings.immobility_min_s
         ),
         gaps=trajectory.gaps,
-        rear_candidates=rear_candidates(
-            [f.area_px if f.detected else None for f in track.frames],
-            mask_elongations(rles, video.height, video.width),
-            speeds_cm_s(trajectory.points, arena.px_per_cm, fps),
-            fps,
-            settings,
-        ),
+        rear_candidates=candidates,
+        rear_count=rear_count(candidates, settings.rear_scorer) if known else None,
     )

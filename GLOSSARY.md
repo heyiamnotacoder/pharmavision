@@ -29,8 +29,12 @@ Frames, or a whole trial, left out of the statistics, with the reason and whethe
 _Avoid_: Rejection, filter, drop
 
 **Rear candidate**:
-A window of frames where the animal may be rearing: its mask shrank and changed shape while it stayed in place. Found by rules in the measure stage, then judged by the behaviours stage; a candidate is never counted as a rear itself.
+A window of frames where the animal may be rearing: its mask shrank and changed shape while it stayed in place. Found by rules in the measure stage, which also scores it (see rear score); the behaviours stage shows it to Muse Spark for a second opinion.
 _Avoid_: Rear, rearing event (for an unjudged window)
+
+**Rear score**:
+How likely a rear candidate holds a rear, from 0 to 1: a logistic over the candidate's mask features (duration, area drop, elongation change, speed, mask area), fitted on the train split's rater labels. The **rear count** is the candidates scoring at least the scorer's threshold. Measured, so it belongs to the measure stage; Muse Spark's label is a second opinion beside it.
+_Avoid_: Rear probability (it is not calibrated per video), model rear count
 
 **Behaviour event**:
 One judged rear candidate: its frames, the model's label (rearing or none), its confidence and rationale, and whether a rule or the model produced it. Every candidate gets one, so each verdict can be checked; one under the minimum confidence is a low-confidence event, reported as such.

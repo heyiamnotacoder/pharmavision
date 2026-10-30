@@ -145,6 +145,7 @@ This is the most heavily tested module.
 | Immobility | Mask change between consecutive frames, 1 − IoU on the stored RLE. A bout is a stretch of changes below `immobility_change_max`; k of them join k + 1 frames, and the bout counts if those frames last at least `immobility_min_s`. |
 | Freezing | Velocity and mask change both below threshold for ≥ the minimum duration. |
 | Rear candidates | Rule-based windows, listed in `metrics.json` as `rear_candidates` (first and last frame). A candidate frame has a mask area at least `rear_area_drop` below its baseline, an elongation (major over minor axis, from the mask's second moments) at least `rear_elongation_change` away from its baseline either way, and a centroid speed of at most `rear_max_speed_cm_s`. Each baseline is a running median over `rear_baseline_s` centred on the frame, because the wide-angle lens changes the apparent size of the animal across the arena. A break of less than `rear_merge_s` between candidate frames joins them into one window unless the position is unknown somewhere in the break; windows shorter than `rear_min_s` are dropped. These are *candidates* for stage 5, not results. |
+| Rear score and count | Each candidate carries its features (`RearFeatures`: duration, deepest and mean area drop below baseline, largest elongation change, mean speed, mean mask area in cm²) and a score: the logistic of `MeasureSettings.rear_scorer`'s intercept plus each feature times its weight. `rear_count` is the candidates scoring at least the scorer's threshold, `null` without a tracked frame. The weights and threshold are fitted on the train split by `spike.rear_scorer` and versioned with the settings (v4, [ADR 0002](adr/0002-rear-count-measured-muse-second-opinion.md)). |
 
 Every threshold is a named parameter in a versioned `MeasureSettings`, recorded in the manifest
 when the run starts, with distances in cm and times in seconds (the filter window is in frames).
@@ -190,9 +191,10 @@ purity.
   event under `BehaviourSettings.min_confidence`
   (0.6) is marked `low_confidence` and reported as such. The settings are versioned in the
   manifest.
-- **Measured Oct 30 (open decision 3): Muse Spark labels are not trusted for rear counts,**
-  zero-shot or few-shot. No rear count comes from the events labelled `rearing`: until a
-  measured rear scorer replaces or gates them, the report abstains on rear counts.
+- **Muse Spark is a second opinion (open decision 3, ADR 0002).** Its labels are not trusted
+  for rear counts, zero-shot or few-shot. The count is `metrics.rear_count` from stage 4; the
+  events keep Muse Spark's label and rationale beside each candidate's score, and the eval
+  reports how often it agrees with the raters and with the scorer.
 
 ### 6. QC (measures, then judges)
 - Deterministic flags (`measure/qc.py`, T6a), on the raw track, with every threshold in a

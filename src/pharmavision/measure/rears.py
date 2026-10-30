@@ -4,13 +4,14 @@ From a top-view camera a rear shows only in the mask: it shrinks as the body ris
 lens and changes shape, while the animal stays in place. The windows are inputs for
 classification, never results."""
 
+import math
 import warnings
 from collections.abc import Sequence
 
 import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
 
-from ..artifacts import MeasureSettings, RearCandidate
+from ..artifacts import MeasureSettings, RearCandidate, RearFeatures, RearScorer
 from .stretches import stretches
 
 
@@ -19,6 +20,7 @@ def rear_candidates(
     elongations: Sequence[float | None],
     speeds_cm_s: Sequence[float | None],
     fps: float,
+    px_per_cm: float,
     settings: MeasureSettings,
 ) -> list[RearCandidate]:
     """One value per frame in each sequence, None where it is unknown; an unknown speed means
@@ -26,7 +28,9 @@ def rear_candidates(
     `rear_area_drop` below its baseline, its elongation at least `rear_elongation_change` away
     from its baseline either way, and a speed of at most `rear_max_speed_cm_s`. A break of less
     than `rear_merge_s` between candidate frames joins them into one window unless a speed in
-    the break is unknown, and windows shorter than `rear_min_s` are dropped."""
+    the break is unknown, and windows shorter than `rear_min_s` are dropped. Each window carries
+    its features over the frames where they are known, and their score by
+    `settings.rear_scorer`."""
     window = max(1, round(settings.rear_baseline_s * fps)) | 1  # odd, so it centres on a frame
     area_baseline = _running_median(areas_px, window)
     elongation_baseline = _running_median(elongations, window)
@@ -50,11 +54,50 @@ def rear_candidates(
             and all(s is not None for s in speeds_cm_s[between.start : after.start])
         ):
             candidate[between.start : after.start] = [True] * between.length
-    return [
-        RearCandidate(first_frame=s.start, last_frame=s.start + s.length - 1)
-        for s in stretches(candidate)
-        if s.value and s.length / fps >= settings.rear_min_s
-    ]
+    area = np.array([np.nan if a is None else a for a in areas_px], dtype=np.float64)
+    area_ratio = area / area_baseline
+    elongation_ratio = np.array([np.nan if e is None else e for e in elongations]) / np.array(
+        elongation_baseline
+    )
+    speed = np.array([np.nan if v is None else v for v in speeds_cm_s], dtype=np.float64)
+    found_windows: list[RearCandidate] = []
+    for s in stretches(candidate):
+        if not s.value or s.length / fps < settings.rear_min_s:
+            continue
+        window = slice(s.start, s.start + s.length)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)  # a frame of the window unknown
+            features = RearFeatures(
+                duration_s=s.length / fps,
+                area_drop=float(1 - np.nanmin(area_ratio[window])),
+                mean_area_drop=float(1 - np.nanmean(area_ratio[window])),
+                elongation_change=float(np.nanmax(np.abs(elongation_ratio[window] - 1))),
+                mean_speed_cm_s=float(np.nanmean(speed[window])),
+                mean_area_cm2=float(np.nanmean(area[window])) / px_per_cm**2,
+            )
+        found_windows.append(
+            RearCandidate(
+                first_frame=s.start,
+                last_frame=s.start + s.length - 1,
+                features=features,
+                score=rear_score(features, settings.rear_scorer),
+            )
+        )
+    return found_windows
+
+
+def rear_score(features: RearFeatures, scorer: RearScorer) -> float:
+    """The logistic of the intercept plus each feature times its weight."""
+    weights = scorer.weights.model_dump()
+    z = scorer.intercept + sum(
+        weights[name] * value for name, value in features.model_dump().items()
+    )
+    return 1 / (1 + math.exp(-z))
+
+
+def rear_count(candidates: Sequence[RearCandidate], scorer: RearScorer) -> int:
+    """The candidates the scorer counts as rears: a score at least its threshold."""
+    return sum(c.score >= scorer.threshold for c in candidates)
 
 
 def _running_median(values: Sequence[float | None], window: int) -> list[float]:

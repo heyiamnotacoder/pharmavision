@@ -12,7 +12,7 @@ import pytest
 from numpy.typing import NDArray
 from shapely.geometry import Polygon
 
-from pharmavision.artifacts import ArenaSettings, Gap, MeasureSettings, RearCandidate
+from pharmavision.artifacts import ArenaSettings, Gap, MeasureSettings
 from pharmavision.pipeline import (
     ArenaNotConfirmedError,
     ArenaNotFoundError,
@@ -230,7 +230,7 @@ def test_the_manifest_records_the_versioned_measure_settings(
     )
 
     assert default_run.manifest().measure == MeasureSettings()
-    assert default_run.manifest().measure.version == 3
+    assert default_run.manifest().measure.version == 4
     assert custom_run.manifest().measure == custom
 
 
@@ -396,7 +396,8 @@ def test_a_still_shrink_and_elongate_episode_gives_one_rear_candidate(
 ) -> None:
     run = finished_run(tmp_path, runs_dir, walk_stop_walk, body=rears_in(REAR))
 
-    assert run.metrics().rear_candidates == [RearCandidate(first_frame=25, last_frame=39)]
+    [candidate] = run.metrics().rear_candidates
+    assert (candidate.first_frame, candidate.last_frame) == (25, 39)
 
 
 @pytest.mark.parametrize(
