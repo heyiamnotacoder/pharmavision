@@ -16,7 +16,8 @@ class ArenaNotFoundError(RuntimeError):
 def detect(run: RunFolder, segmenter: Segmenter) -> Arena:
     manifest = run.manifest()
     template, settings = manifest.template, manifest.arena
-    image = background_frame(run, settings.background_samples)
+    background = background_frame(run, settings.background_samples)
+    image = equalise(background, settings.contrast_clip_limit)
     mask = best_mask(segmenter.segment_image(image, template.floor_prompt))
     floor = mask_to_polygon(mask.pixels, settings.outline_tolerance) if mask else []
     if len(floor) < 3 or polygon_area(floor) == 0:
@@ -43,6 +44,16 @@ def background_frame(run: RunFolder, samples: int) -> NDArray[np.uint8]:
     finally:
         capture.release()
     return np.median(np.stack(frames), axis=0).astype(np.uint8)
+
+
+def equalise(image: NDArray[np.uint8], clip_limit: float | None) -> NDArray[np.uint8]:
+    """Local contrast stretch (CLAHE) on the lightness channel only, so colours keep their hue.
+    The image unchanged when `clip_limit` is None."""
+    if clip_limit is None:
+        return image
+    lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
+    lab[..., 0] = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=(8, 8)).apply(lab[..., 0])
+    return np.asarray(cv2.cvtColor(lab, cv2.COLOR_LAB2BGR), dtype=np.uint8)
 
 
 def mask_to_polygon(mask: NDArray[np.bool_], tolerance: float) -> list[Point]:

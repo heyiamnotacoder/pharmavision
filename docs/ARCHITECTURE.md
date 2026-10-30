@@ -59,6 +59,12 @@ video format both SAM 3.1 and Muse Spark accept.
   - elevated plus maze: "open arm", "closed arm", "center square"
   - forced swim: "water cylinder"
   SAM 3.1 takes **one concept per request**, so each zone prompt is a separate call.
+- **The prompt sees the background equalised** (CLAHE on lightness, `ArenaSettings.contrast_clip_limit`,
+  default 2.0). SAM 3.1 returns no mask it scores under about 0.5. On the ingested background of
+  OFT_44 (CAM01) and OFT_54 (CAM03), "square floor" found nothing; equalised, it scored 0.62 and
+  0.53, the same floor (21.7% of the frame) as on the CAM04 videos, which also scored a little
+  higher (0.66 → 0.69 on OFT_50). Found by the rear-recall run, Oct 30. OFT_54 still sits near the
+  cutoff, so a floor that is never found has to fall back to the user drawing it (T10).
 - **Derived zones are geometry, not prompts.** The open-field centre zone is the inner X% of the
   floor polygon **by area** (the floor shrunk about its centroid), computed in Python. The open
   field template uses 50%, as Sturman et al. 2020 did (45 × 45 cm arena, 10 min).
