@@ -5,6 +5,9 @@ import itertools
 import math
 from collections.abc import Sequence
 
+import numpy as np
+from numpy.typing import NDArray
+
 from ..artifacts import (
     Arena,
     Exclusion,
@@ -51,6 +54,13 @@ def trial_qc(
             )
         )
     return Qc(flags=flags, exclusions=exclusions)
+
+
+def largest_area_cm2(masks: Sequence[NDArray[np.bool_]], px_per_cm: float) -> float | None:
+    """The area of the largest of a frame's masks (a hand prompt's), in cm², or None when it
+    has no mask that is not empty."""
+    largest = max((int(mask.sum()) for mask in masks), default=0)
+    return largest / px_per_cm**2 if largest else None
 
 
 def _kept_gap(gap: Gap, fps: float, n_frames: int) -> QcFlag:

@@ -1,15 +1,15 @@
 """Muse Spark on the Meta Model API: the primary Judge backend.
 
-One Responses request per clip, streamed, with structured output. The clip goes inline as a
-base64 MP4 sampled at `input_fps`; few-shot examples go ahead of it as earlier turns (a user
-turn with the example clip, then an assistant turn replaying its label). Every response is
-cached by model id, prompt version and the hash of the clip's frames (and of the prompt and
-examples),
-so a re-run makes no API call, and the recorded Judge replays the same cache with no API at all."""
+One Responses request per clip (a rear candidate's, or a flagged QC window's), streamed, with
+structured output. The clip goes inline as a base64 MP4 sampled at `input_fps`; few-shot
+examples go ahead of a rear clip as earlier turns (a user turn with the example clip, then an
+assistant turn replaying its label). Every response is cached by model id, prompt version and
+the hash of the clip's frames (and of the prompt and examples), so a re-run makes no API call,
+and the recorded Judge replays the same cache with no API at all."""
 
 import base64
 import json
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ..model_api import OpenAiTransport, Request, ResponsesTransport
 from ..model_cache import Event, ResponseCache, input_hash
-from . import Clip, ClipJudgement, RearLabel
+from . import Clip, ClipJudgement, FlaggedWindow, RearLabel, WindowVerdict
 
 MAX_VIDEOS = 5
 """Videos the Model API takes in one request (a 400 above it, checked live Oct 30)."""
@@ -50,9 +50,45 @@ SCHEMA = {
 }
 FORMAT = {"type": "json_schema", "name": "rear_label", "schema": SCHEMA, "strict": True}
 
+REVIEW_PROMPT_VERSION = "qc-v1"
+"""The QC review's request shape and wording: bump it when either changes."""
+
+REVIEW_PROMPT = """\
+This clip is a few seconds of a top-view camera over a mouse in an open-field arena, centred on
+frames {first_frame}-{last_frame} of the video, which an automatic quality check flagged. The
+green outline is the mouse's tracked outline.
+
+The check found: {kind}: {reason}.
+A hand detector looked at a few of the flagged frames: {hands}.
+
+Decide what the flagged frames are worth for measuring the mouse's behaviour:
+- keep: the tracking is right and nothing disturbs the mouse (a reflection, a dropping, a brief
+  tracking glitch).
+- exclude_window: leave the flagged frames out (a hand in the arena, the outline on something
+  that is not the mouse), and keep the rest of the trial.
+- exclude_trial: the whole trial is unusable (the mouse is handled or lifted out, escapes, or
+  the arena is disturbed).
+Answer with the verdict and one sentence of reason. Do not state any numbers in the reason."""
+
+REVIEW_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "verdict": {"type": "string", "enum": ["keep", "exclude_window", "exclude_trial"]},
+        "reason": {"type": "string"},
+    },
+    "required": ["verdict", "reason"],
+    "additionalProperties": False,
+}
+REVIEW_FORMAT = {
+    "type": "json_schema",
+    "name": "qc_verdict",
+    "schema": REVIEW_SCHEMA,
+    "strict": True,
+}
+
 
 class JudgeResponseError(RuntimeError):
-    """Muse Spark answered with something other than a complete, well-formed judgement."""
+    """Muse Spark answered with something other than a complete, well-formed answer."""
 
 
 class RecordingMissingError(LookupError):
@@ -140,7 +176,7 @@ class MuseSparkJudge:
         return self.settings.model
 
     def classify_clip(self, clip: Clip) -> ClipJudgement:
-        return _parse(self.response(clip))
+        return _parse(self.response(clip), ClipJudgement)
 
     def response(self, clip: Clip) -> list[Event]:
         """The clip's response as its raw event stream, usage included: from the cache, or else
@@ -153,15 +189,57 @@ class MuseSparkJudge:
             *(f"{e.sha256} {e.reply}" for e in self._examples),
             clip.frames_sha256,
         )
+        return self._respond(
+            PROMPT_VERSION,
+            digest,
+            lambda: self._request(_data_url(clip.video.read_bytes())),
+            ClipJudgement,
+        )
+
+    def review_window(self, window: FlaggedWindow) -> WindowVerdict:
+        """One request per flagged window: the prompt states what the rule and the hand prompts
+        found, then the window's clip. No few-shot examples: they are rear clips."""
+        prompt = _review_prompt(window)
+        digest = input_hash(
+            "qc", prompt, REVIEW_FORMAT, str(self.settings.input_fps), window.clip.frames_sha256
+        )
+
+        def request() -> Request:
+            video = self._video(_data_url(window.clip.video.read_bytes()))
+            content = [{"type": "input_text", "text": prompt}, video]
+            return {
+                "model": self.settings.model,
+                "input": [{"type": "message", "role": "user", "content": content}],
+                "text": {"format": REVIEW_FORMAT},
+            }
+
+        return _parse(
+            self._respond(REVIEW_PROMPT_VERSION, digest, request, WindowVerdict), WindowVerdict
+        )
+
+    def _respond(
+        self,
+        prompt_version: str,
+        digest: str,
+        request: Callable[[], Request],
+        answer: type[BaseModel],
+    ) -> list[Event]:
+        """The raw event stream: from the cache, or else from one API call, cached once it
+        parses as an `answer`. `request` is built only on a miss."""
         model = self.settings.model
-        cached = self.cache.get(model, PROMPT_VERSION, digest)
+        cached = self.cache.get(model, prompt_version, digest)
         if cached is not None:
             return cached
-        request = self._request(_data_url(clip.video.read_bytes()))
-        stream = list(self.transport.stream(request))
-        _parse(stream)
-        self.cache.put(model, PROMPT_VERSION, digest, stream)
+        stream = list(self.transport.stream(request()))
+        _parse(stream, answer)
+        self.cache.put(model, prompt_version, digest, stream)
         return stream
+
+    def _video(self, video_url: str) -> dict[str, Any]:
+        video: dict[str, Any] = {"type": "input_video", "video_url": video_url}
+        if self.settings.input_fps is not None:
+            video["fps"] = self.settings.input_fps
+        return video
 
     def _request(self, clip_url: str) -> Request:
         """The prompt and the first clip in the first user turn, the shape T2 measured; each
@@ -172,10 +250,7 @@ class MuseSparkJudge:
             content: list[dict[str, Any]] = (
                 [{"type": "input_text", "text": PROMPT}] if n == 0 else []
             )
-            video: dict[str, Any] = {"type": "input_video", "video_url": video_url}
-            if self.settings.input_fps is not None:
-                video["fps"] = self.settings.input_fps
-            content.append(video)
+            content.append(self._video(video_url))
             messages.append({"type": "message", "role": "user", "content": content})
             if reply is not None:
                 text = {"type": "output_text", "text": reply}
@@ -215,8 +290,25 @@ def _data_url(mp4: bytes) -> str:
     return f"data:video/mp4;base64,{base64.b64encode(mp4).decode()}"
 
 
-def _parse(stream: Iterable[Event]) -> ClipJudgement:
-    """The judgement in a completed stream's output text."""
+def _review_prompt(window: FlaggedWindow) -> str:
+    if window.hands:
+        hands = "; ".join(
+            f"{h.prompt!r} on frame {h.frame_index}, largest mask {h.area_cm2:.0f} cm²"
+            for h in window.hands
+        )
+    else:
+        hands = "nothing found"
+    return REVIEW_PROMPT.format(
+        first_frame=window.first_frame,
+        last_frame=window.last_frame,
+        kind=window.kind,
+        reason=window.reason,
+        hands=hands,
+    )
+
+
+def _parse[A: BaseModel](stream: Iterable[Event], answer: type[A]) -> A:
+    """The `answer` in a completed stream's output text."""
     stream = list(stream)
     kinds = {event.get("type") for event in stream}
     if "response.completed" not in kinds:
@@ -225,6 +317,6 @@ def _parse(stream: Iterable[Event]) -> ClipJudgement:
         str(event["delta"]) for event in stream if event.get("type") == "response.output_text.delta"
     )
     try:
-        return ClipJudgement.model_validate_json(text)
+        return answer.model_validate_json(text)
     except ValidationError as error:
-        raise JudgeResponseError(f"malformed Muse Spark judgement {text!r}: {error}") from error
+        raise JudgeResponseError(f"malformed Muse Spark answer {text!r}: {error}") from error

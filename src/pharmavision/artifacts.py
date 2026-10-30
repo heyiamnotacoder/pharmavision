@@ -10,7 +10,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from .judge import RearLabel
+from .judge import HandSighting, QcVerdict, RearLabel
 from .measure.geometry import Point
 from .templates import TestTemplate
 
@@ -150,10 +150,37 @@ class MeasureSettings(Artifact):
         return self
 
 
-class QcSettings(Artifact):
-    """Every threshold the deterministic QC flags use, in cm and seconds like `MeasureSettings`."""
+class QcReviewSettings(Artifact):
+    """How each flagged window is shown to the models: SAM 3.1 looks for hands on a few of its
+    frames, and the judge sees a short whole-frame clip around it."""
 
-    version: int = 1
+    hand_prompts: tuple[str, ...] = ("hand", "glove")
+    """SAM 3.1 takes one concept per request, so each prompt is its own call per frame."""
+    hand_frames: int = Field(default=3, ge=1)
+    """Frames of each window the hand prompts see, evenly spaced from its first to its last."""
+    clip_pad_s: float = Field(default=1.0, ge=0)
+    """Context before and after the window, so the model sees what came before the flag."""
+    clip_min_s: float = Field(default=2.0, gt=0)
+    """A clip is widened about the window to at least this long, ..."""
+    clip_max_s: float = Field(default=6.0, gt=0)
+    """... and a longer one is cut to this long, centred on the window: the model never sees the
+    full video (cost control)."""
+    clip_max_side_px: int = Field(default=480, ge=16)
+    """The whole frame, not a crop around the animal (a hand comes in from the edge), scaled to
+    fit this many pixels on its longer side."""
+
+    @model_validator(mode="after")
+    def _clip_lengths_are_ordered(self) -> "QcReviewSettings":
+        if self.clip_min_s > self.clip_max_s:
+            raise ValueError("clip_min_s must not exceed clip_max_s")
+        return self
+
+
+class QcSettings(Artifact):
+    """Every threshold the deterministic QC flags use, in cm and seconds like `MeasureSettings`,
+    and how the model reviews the flags."""
+
+    version: int = 2
     """Bump when a default or a flag's definition changes."""
     max_tracking_loss_fraction: float = Field(default=0.05, ge=0, le=1)
     """A trial whose animal is missing on more than this fraction of frames is excluded
@@ -170,6 +197,9 @@ class QcSettings(Artifact):
     speed_jump_join_s: float = Field(default=1.0, ge=0)
     """Jumps this close together join one flag, so a mis-detection that lasts several frames
     (a jump out, then one back) is flagged over all of its frames."""
+    review: QcReviewSettings | None = QcReviewSettings()
+    """None turns the model review off (the first item on the cut list): the deterministic flags
+    and exclusions then stand alone, as they are with the review on and nothing flagged."""
 
 
 class BehaviourSettings(Artifact):
@@ -392,11 +422,25 @@ class Exclusion(Artifact):
     """A deterministic QC rule, or the model's review of a flagged window."""
 
 
+class QcReview(Artifact):
+    """The model review of one flagged window: what SAM 3.1's hand prompts found on its sampled
+    frames, and the judge's verdict with its reason. Every verdict is listed, kept or not. For a
+    flag longer than `QcReviewSettings.clip_max_s` the judge saw only its middle, and an
+    `exclude_window` verdict still leaves out all of the flag's frames: the safer error."""
+
+    flag: QcFlag
+    hands: list[HandSighting]
+    verdict: QcVerdict
+    reason: str
+
+
 class Qc(Artifact):
     """Every QC flag and every exclusion it led to, so nothing is dropped silently."""
 
     flags: list[QcFlag]
     exclusions: list[Exclusion]
+    reviews: list[QcReview] = []
+    """One per warning the models reviewed, in flag order; empty with the review off."""
 
     @property
     def trial_excluded(self) -> bool:

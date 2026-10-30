@@ -23,6 +23,29 @@ class ClipJudgement(BaseModel):
     rationale: str
 
 
+QcVerdict = Literal["keep", "exclude_window", "exclude_trial"]
+"""What to do with a flagged window: keep it, leave its frames out, or leave the trial out."""
+
+
+class WindowVerdict(BaseModel):
+    """What the model said about one flagged window."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    verdict: QcVerdict
+    reason: str
+
+
+class HandSighting(BaseModel):
+    """A "hand" or "glove" prompt's largest mask on one sampled frame of a flagged window."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    prompt: str
+    frame_index: int
+    area_cm2: float
+
+
 @dataclass(frozen=True)
 class Clip:
     """A short MP4 cut from a run's video, and the hash of the frames it was encoded from. The
@@ -33,6 +56,21 @@ class Clip:
     frames_sha256: str
 
 
+@dataclass(frozen=True)
+class FlaggedWindow:
+    """A QC flag for the judge to review: the clip around its frames, what the rule found there,
+    and what the hand prompts found on its sampled frames."""
+
+    clip: Clip
+    kind: str
+    """The flag's kind, e.g. "second_mask"."""
+    first_frame: int
+    last_frame: int
+    reason: str
+    """The rule's own reason, as the QC artifact records it."""
+    hands: tuple[HandSighting, ...]
+
+
 class Judge(Protocol):
     @property
     def model_id(self) -> str:
@@ -41,4 +79,8 @@ class Judge(Protocol):
 
     def classify_clip(self, clip: Clip) -> ClipJudgement:
         """Label one short clip. It is never the full video."""
+        ...
+
+    def review_window(self, window: FlaggedWindow) -> WindowVerdict:
+        """Decide what one flagged window's frames are worth. Its clip is never the full video."""
         ...

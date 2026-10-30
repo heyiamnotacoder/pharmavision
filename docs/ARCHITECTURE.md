@@ -27,7 +27,7 @@ runs/<run_id>/
   track.parquet      # one row per frame: centroid, area, bbox, axes, orientation, mask RLE, gap flag, second-mask area
   metrics.json       # per-animal metric table (measures)
   events.parquet     # behaviour events: first/last frame, label, confidence, low_confidence, rationale, source (rule | model)
-  qc.json            # flags with frame ranges, severity and reason; the exclusions they lead to
+  qc.json            # flags with frame ranges, severity and reason; the model's reviews; the exclusions
 ```
 
 Model responses live outside any one run, in `runs/model_cache/<model>/<prompt version>/<input
@@ -167,10 +167,11 @@ purity.
   class Judge(Protocol):
       model_id: str  # recorded in the manifest per stage
 
-      def classify_clip(self, clip: Path) -> ClipJudgement: ...  # label, confidence, rationale
+      def classify_clip(self, clip: Clip) -> ClipJudgement: ...  # label, confidence, rationale
+      def review_window(self, window: FlaggedWindow) -> WindowVerdict: ...  # verdict, reason
   ```
 
-  QC review and the report agent join it in T6b and T9.
+  The QC review joined it in T6b (stage 6); the report agent joins it in T9.
 - `MuseSparkJudge` (`judge/muse_spark.py`): `muse-spark-1.3` on the Responses API, streamed,
   `input_video` as a base64 MP4 with `fps: 15`, structured output
   `{label: rearing | none, confidence, rationale}`: binary, as open decision 3 decided. The
@@ -209,14 +210,33 @@ purity.
   | `second_mask` | another mask of at least `second_mask_min_area_cm2` (10 cm²) in the frame | warning |
 
   Only critical flags exclude anything; warnings are listed and go to the model review below.
-  SAM 3.1 is also prompted with "hand" and "glove" on flagged windows.
 - **Known limits of `second_mask`** (measure on the laptop before trusting it): the second mask
   is the next instance of the *animal* prompt, so real SAM 3.1 may rarely give one for a hand,
   and may give one for a reflection. A hand seen while the animal is not is tracked *as* the
   animal and shows up as a `speed_jump`, not a `second_mask`. The "hand" / "glove" prompts
   (T6b) are the real hand detector. With two animals per video (FR-S3) the rule must look at
   the third mask instead.
-- Muse Spark reviews only the flagged windows and returns `{verdict: exclude_window | keep | exclude_trial, reason}`.
+- **Model review** (`stages/qc.py`, T6b), only of warnings, with `QcSettings.review`
+  (`QcReviewSettings`) in the manifest; `review: None` turns it off and leaves the deterministic
+  QC exactly as T6a wrote it. Nothing goes to a model when nothing is flagged, or when a rule has
+  already excluded the trial (no verdict could change it). For each warning:
+  - **Sees:** SAM 3.1 `segment_image` with each of `hand_prompts` ("hand", "glove") on
+    `hand_frames` (3) frames evenly spaced over the flag, read front to back from the
+    normalised video so the cache key (the frame's bytes) is the same on every machine. Each
+    prompt's largest mask becomes a `HandSighting` (prompt, frame, area in cm²).
+  - **Judges:** Muse Spark sees a clip of the **whole frame** (a hand comes in from the edge, so
+    no crop around the animal), the flag padded by `clip_pad_s` (1 s), 2–6 s, scaled to fit
+    `clip_max_side_px` (480), mask outlined in green, cut by the same `stages/clips.py` as the
+    behaviours clips. The prompt states the flag's kind, frames and reason and the hand
+    sightings, and asks for `{verdict: keep | exclude_window | exclude_trial, reason}`, cached
+    under `<model>/qc-v1/<hash>`. It is told not to state numbers in its reason, but nothing
+    enforces that yet: the T9 number audit must cover the reasons in `qc.json` too. A flag
+    longer than `clip_max_s` is judged on its middle, and `exclude_window` still leaves out all
+    of its frames (the safer error).
+  - Each review (flag, sightings, verdict, reason) is listed in `qc.json` `reviews`, kept or
+    not. `exclude_window` adds a window exclusion over the flag's frames and `exclude_trial` a
+    trial exclusion, both `source: model` with the model's reason. The manifest records the
+    models as `qc` (judge) and `qc_hands` (segmenter) when the review called them.
 - Every exclusion is listed in the report. Nothing is dropped silently.
 - Verdicts apply automatically. Zone confirmation stays the only human gate; low-confidence events
   are reported as such rather than queued for review. A human override after the fact is stretch
