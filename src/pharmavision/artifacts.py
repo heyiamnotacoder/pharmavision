@@ -4,6 +4,7 @@ between stages, and every read validates against it."""
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Literal
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -84,6 +85,28 @@ class MeasureSettings(Artifact):
         return self
 
 
+class QcSettings(Artifact):
+    """Every threshold the deterministic QC flags use, in cm and seconds like `MeasureSettings`."""
+
+    version: int = 1
+    """Bump when a default or a flag's definition changes."""
+    max_tracking_loss_fraction: float = Field(default=0.05, ge=0, le=1)
+    """A trial whose animal is missing on more than this fraction of frames is excluded
+    (FR-4: at least 95% of frames tracked)."""
+    out_of_arena_margin_cm: float = Field(default=2.0, ge=0)
+    """Outside the arena: the centroid at least this far beyond the floor edge. The margin
+    absorbs the floor outline's error at the walls."""
+    second_mask_min_area_cm2: float = Field(default=10.0, gt=0)
+    """A second object at least this large beside the animal is flagged: a hand or a second
+    animal is far larger; droppings and reflections are smaller."""
+    max_speed_cm_s: float = Field(default=100.0, gt=0)
+    """Faster than a mouse runs in an open field, so a faster step between two detections is a
+    mis-detection, not movement. Walking is a few cm/s."""
+    speed_jump_join_s: float = Field(default=1.0, ge=0)
+    """Jumps this close together join one flag, so a mis-detection that lasts several frames
+    (a jump out, then one back) is flagged over all of its frames."""
+
+
 class Manifest(Artifact):
     run_id: str
     created_at: datetime
@@ -92,6 +115,7 @@ class Manifest(Artifact):
     ingest: IngestSettings
     arena: ArenaSettings
     measure: MeasureSettings
+    qc: QcSettings
     source: SourceVideo
     video: NormalisedVideo
     models: dict[str, str] = {}
@@ -119,6 +143,9 @@ class TrackFrame(Artifact):
     area_px: int = 0
     confidence: float | None = None
     mask_rle: str | None = None
+    second_area_px: int = 0
+    """Area of the largest other mask in the frame (0 for none): one animal is expected, so a
+    second object is something QC must look at, such as a hand."""
 
     @classmethod
     def gap(cls, frame_index: int) -> "TrackFrame":
@@ -149,6 +176,7 @@ TRACK_SCHEMA = pa.schema(
         ("area_px", pa.int32()),
         ("confidence", pa.float64()),
         ("mask_rle", pa.string()),
+        ("second_area_px", pa.int32()),
     ]
 )
 
@@ -186,6 +214,43 @@ class Metrics(Artifact):
     """Fraction of the time with a known position spent near the wall, 0 to 1."""
     immobility_s: float | None
     gaps: list[Gap]
+
+
+QcFlagKind = Literal["tracking_loss", "out_of_arena", "speed_jump", "second_mask"]
+Severity = Literal["warning", "critical"]
+
+
+class QcFlag(Artifact):
+    """Something in the trial that may make its numbers wrong, over frames `first_frame` to
+    `last_frame` (inclusive). A critical flag leads to an exclusion; a warning is listed."""
+
+    kind: QcFlagKind
+    first_frame: int
+    last_frame: int
+    severity: Severity
+    reason: str
+
+
+class Exclusion(Artifact):
+    """Frames (or the whole trial) left out of the statistics, and why."""
+
+    scope: Literal["trial", "window"]
+    first_frame: int
+    last_frame: int
+    reason: str
+    source: Literal["rule", "model"]
+    """A deterministic QC rule, or the model's review of a flagged window."""
+
+
+class Qc(Artifact):
+    """Every QC flag and every exclusion it led to, so nothing is dropped silently."""
+
+    flags: list[QcFlag]
+    exclusions: list[Exclusion]
+
+    @property
+    def trial_excluded(self) -> bool:
+        return any(e.scope == "trial" for e in self.exclusions)
 
 
 @dataclass(frozen=True)
@@ -234,6 +299,12 @@ class RunFolder:
 
     def write_metrics(self, metrics: Metrics) -> None:
         self._write("metrics.json", metrics)
+
+    def qc(self) -> Qc:
+        return self._read("qc.json", Qc)
+
+    def write_qc(self, qc: Qc) -> None:
+        self._write("qc.json", qc)
 
     def _read[A: Artifact](self, name: str, kind: type[A]) -> A:
         return kind.model_validate_json((self.path / name).read_text())
