@@ -417,9 +417,12 @@ the demo and write-up, the same way PaedScale published its validation table.
      change and speed, scored leave-one-video-out, gives AUC 0.75, κ 0.37, precision 0.71,
      recall 0.74 (one-off check; the scorer's own spike will replace it with a kept script).
 
-   **Rule:** few-shot stays off by default and the model's rear labels are not trusted. Rear
-   detection moves to a measured scorer on the mask features (measures layer), fitted on the
-   train split and checked on the eval split; Muse Spark keeps the rationale at most.
+   **Rule ([ADR 0002](adr/0002-rear-count-measured-muse-second-opinion.md)):** few-shot stays
+   off by default and the model's rear labels are not trusted. The rear count moves to a
+   measured scorer on the mask features (measures layer), fitted on the train split and checked
+   on the eval split (tracked now, about $25). Muse Spark stays as a second opinion: its label
+   and rationale stay on each event and the eval reports its agreement, but it never sets the
+   count.
 4. **Frontend stack. Decided Oct 29:** Vite + React + TypeScript (strict), because the overlay and
    zone editor are the demo.
 5. **Python environment. Decided Oct 29:** `uv`, Python 3.12, `ruff` everywhere, `pyright` strict on
