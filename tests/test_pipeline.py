@@ -26,7 +26,19 @@ from pharmavision.pipeline import (
 from pharmavision.segmenter import Mask
 from pharmavision.segmenter.synthetic import SyntheticSegmenter
 
-from .scenes import FLOOR, N_FRAMES, PX_PER_CM, TEMPLATE, circle_walk, finished_run
+from .judges import ScriptedJudge
+from .scenes import (
+    FLOOR,
+    N_FRAMES,
+    PX_PER_CM,
+    REAR,
+    TEMPLATE,
+    WALKING_BODY,
+    circle_walk,
+    finished_run,
+    rears_in,
+    walk_stop_walk,
+)
 from .videos import make_video
 
 
@@ -131,7 +143,7 @@ def test_arena_derives_the_centre_zone_and_scale_from_the_floor(
     assert floor.contains(centre)
 
 
-@pytest.mark.parametrize("stage", [Stage.TRACK, Stage.MEASURE, Stage.QC])
+@pytest.mark.parametrize("stage", list(Stage))
 def test_stages_after_arena_refuse_an_unconfirmed_arena(
     stage: Stage, tmp_path: Path, runs_dir: Path
 ) -> None:
@@ -141,7 +153,7 @@ def test_stages_after_arena_refuse_an_unconfirmed_arena(
     before = sorted(p.name for p in run.path.iterdir())
 
     with pytest.raises(ArenaNotConfirmedError):
-        run_stage(run, stage, segmenter)
+        run_stage(run, stage, segmenter, ScriptedJudge())
 
     assert sorted(p.name for p in run.path.iterdir()) == before
 
@@ -152,14 +164,18 @@ def test_a_circle_walk_gives_its_known_distance(tmp_path: Path, runs_dir: Path) 
     run = start_run(video, TEMPLATE, segmenter, runs_dir)
 
     confirm_arena(run)
-    finish_run(run, segmenter)
+    finish_run(run, segmenter, ScriptedJudge())
 
     # 90 px is 13.5 cm on a 45 cm floor 300 px wide; two laps are 2 x 2 pi r.
     assert run.metrics().distance_travelled_cm == pytest.approx(2 * 2 * math.pi * 13.5, rel=0.01)
     frames = run.track().frames
     assert [f.frame_index for f in frames] == list(range(N_FRAMES))
     assert all(f.detected for f in frames)
-    assert run.manifest().models == {"arena": "synthetic", "track": "synthetic"}
+    assert run.manifest().models == {
+        "arena": "synthetic",
+        "track": "synthetic",
+        "behaviours": "scripted",
+    }
 
 
 def test_track_is_keyed_by_frame_index_whatever_the_delivery_order(
@@ -175,7 +191,7 @@ def test_track_is_keyed_by_frame_index_whatever_the_delivery_order(
     run = start_run(video, TEMPLATE, segmenter, runs_dir)
 
     confirm_arena(run)
-    finish_run(run, segmenter)
+    finish_run(run, segmenter, ScriptedJudge())
 
     frames = run.track().frames
     assert [f.frame_index for f in frames] == list(range(N_FRAMES))
@@ -191,7 +207,7 @@ def test_an_animal_never_found_leaves_every_metric_unknown(tmp_path: Path, runs_
     run = start_run(video, TEMPLATE, segmenter, runs_dir)
 
     confirm_arena(run)
-    finish_run(run, segmenter)
+    finish_run(run, segmenter, ScriptedJudge())
 
     assert not any(f.detected for f in run.track().frames)
     metrics = run.metrics()
@@ -362,7 +378,7 @@ def test_the_same_video_and_settings_give_identical_metrics(tmp_path: Path, runs
 
     for run in runs:
         confirm_arena(run)
-        finish_run(run, segmenter)
+        finish_run(run, segmenter, ScriptedJudge())
 
     first, second = (run.metrics() for run in runs)
     assert first.distance_travelled_cm is not None
@@ -373,22 +389,6 @@ def test_the_same_video_and_settings_give_identical_metrics(tmp_path: Path, runs
     assert (runs[0].path / "metrics.json").read_bytes() == (
         runs[1].path / "metrics.json"
     ).read_bytes()
-
-
-# A walking body, 10 x 7 px semi-axes (elongation 1.43), and a rear seen from above: the mask
-# shrinks to 8 x 4 px (46% of the area) and gets longer and thinner (elongation 2.0).
-WALKING_BODY = (10.0, 7.0)
-REAR = range(25, 40)  # 1 s
-
-
-def rears_in(episode: range) -> Callable[[int], tuple[float, float]]:
-    """The walking body, with the rear's body in the `episode` frames."""
-    return lambda i: (8.0, 4.0) if i in episode else WALKING_BODY
-
-
-def walk_stop_walk(i: int) -> tuple[float, float]:
-    """6 px per frame (13.5 cm/s) along the midline, standing still for frames 15-44."""
-    return (60.0 + 6 * (i if i < 15 else 15 if i < 45 else i - 30), 180.0)
 
 
 def test_a_still_shrink_and_elongate_episode_gives_one_rear_candidate(

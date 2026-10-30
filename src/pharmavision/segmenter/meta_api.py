@@ -8,7 +8,6 @@ by line position."""
 import asyncio
 import base64
 import json
-import os
 import subprocess
 import tempfile
 from collections import defaultdict
@@ -31,14 +30,13 @@ from meta_sam_parser import (
 from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from ..model_api import OpenAiTransport, Request, ResponsesTransport
 from ..model_cache import Event, ResponseCache, file_sha256, input_hash
 from . import FrameMasks, Mask
 from .chunks import handover_frame, plan_chunks, relink
 
 PROMPT_VERSION = "sam-v1"
 """The request shape (prompt wording aside, which is hashed): bump it when the request changes."""
-
-Request = Mapping[str, Any]
 
 
 class SamResponseError(RuntimeError):
@@ -67,42 +65,12 @@ class MetaApiSettings(BaseModel):
         return self
 
 
-class SamTransport(Protocol):
+class SamTransport(ResponsesTransport, Protocol):
     """The two Model API calls the backend makes. Tests replay recordings through this."""
 
     def upload(self, video: Path) -> str:
         """Upload a video through the Files API; returns its file id."""
         ...
-
-    def stream(self, request: Request) -> Iterable[Event]:
-        """Stream one Responses API request; yields every event as a JSON mapping."""
-        ...
-
-
-class OpenAiTransport:
-    """The Model API is OpenAI-compatible. The client is made on first use, so a run served
-    entirely from the cache needs no API key."""
-
-    def __init__(self, base_url: str) -> None:
-        self.base_url = base_url
-        self._client: Any = None
-
-    def upload(self, video: Path) -> str:
-        with video.open("rb") as f:
-            return self._openai().files.create(purpose="user_data", file=f).id
-
-    def stream(self, request: Request) -> Iterator[Event]:
-        for event in self._openai().responses.create(stream=True, **request):
-            yield event.model_dump(mode="json")
-
-    def _openai(self) -> Any:
-        if self._client is None:
-            from dotenv import find_dotenv, load_dotenv
-            from openai import OpenAI
-
-            load_dotenv(find_dotenv(usecwd=True))
-            self._client = OpenAI(base_url=self.base_url, api_key=os.environ["MODEL_API_KEY"])
-        return self._client
 
 
 class MetaApiSegmenter:

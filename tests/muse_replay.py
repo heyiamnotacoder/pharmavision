@@ -1,0 +1,46 @@
+"""Muse Spark Responses streams for tests: a structured-output answer in the envelope of a real
+Model API recording, replayed through the same transport as the SAM 3.1 tests."""
+
+import base64
+import json
+import subprocess
+from collections.abc import Iterator, Mapping
+from pathlib import Path
+from typing import Any
+
+from .sam_replay import Event, responses_events
+
+
+def answer(label: str, confidence: float = 0.9, rationale: str = "Rears up.") -> list[Event]:
+    """A completed stream whose output text is the JSON answer, in one delta."""
+    text = json.dumps({"label": label, "confidence": confidence, "rationale": rationale})
+    return responses_events([text])
+
+
+def videos_sent(request: Mapping[str, Any]) -> Iterator[Mapping[str, Any]]:
+    """Every `input_video` part in a Responses request, in order."""
+    for message in request["input"]:
+        for part in message["content"]:
+            if part["type"] == "input_video":
+                yield part
+
+
+def decode_video(part: Mapping[str, Any], dest: Path) -> Path:
+    """Write an `input_video` part's base64 data URL to `dest`."""
+    header, data = part["video_url"].split(",", 1)
+    assert header == "data:video/mp4;base64"
+    dest.write_bytes(base64.b64decode(data))
+    return dest
+
+
+def frame_size_and_count(video: Path) -> tuple[int, int, int]:
+    """Width, height and exact frame count (packets counted)."""
+    out = subprocess.run(
+        [
+            "ffprobe", "-v", "error", "-select_streams", "v:0", "-count_packets",
+            "-show_entries", "stream=width,height,nb_read_packets", "-of", "json", str(video),
+        ],
+        check=True, capture_output=True, text=True,
+    ).stdout  # fmt: skip
+    stream = json.loads(out)["streams"][0]
+    return int(stream["width"]), int(stream["height"]), int(stream["nb_read_packets"])

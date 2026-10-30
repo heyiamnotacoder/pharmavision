@@ -1,5 +1,5 @@
 """The pipeline entry: the one test seam. A run goes ingest → arena, stops at the arena gate,
-and continues with track → measure → QC once a human confirms the zones."""
+and continues with track → measure → behaviours → QC once a human confirms the zones."""
 
 import shutil
 import uuid
@@ -12,6 +12,7 @@ from .artifacts import (
     Arena,
     ArenaNotConfirmedError,
     ArenaSettings,
+    BehaviourSettings,
     IngestSettings,
     Manifest,
     MeasureSettings,
@@ -19,8 +20,9 @@ from .artifacts import (
     QcSettings,
     RunFolder,
 )
+from .judge import Judge
 from .segmenter import Segmenter
-from .stages import arena, ingest, measure, qc, track
+from .stages import arena, behaviours, ingest, measure, qc, track
 from .stages.arena import ArenaNotFoundError
 from .stages.ingest import VideoTooShortError
 from .templates import TestTemplate
@@ -43,6 +45,7 @@ class Stage(StrEnum):
 
     TRACK = "track"
     MEASURE = "measure"
+    BEHAVIOURS = "behaviours"
     QC = "qc"
 
 
@@ -55,6 +58,7 @@ def start_run(
     arena_settings: ArenaSettings | None = None,
     measure_settings: MeasureSettings | None = None,
     qc_settings: QcSettings | None = None,
+    behaviour_settings: BehaviourSettings | None = None,
 ) -> RunFolder:
     """Ingest the video into a new run folder and detect the arena, which waits unconfirmed.
     All or nothing: if the video is too short or no floor is found, no run folder is left."""
@@ -74,13 +78,14 @@ def start_run(
                 ingest=ingest_settings,
                 arena=arena_settings or ArenaSettings(),
                 measure=measure_settings or MeasureSettings(),
+                behaviours=behaviour_settings or BehaviourSettings(),
                 qc=qc_settings or QcSettings(),
                 source=source,
                 video=normalised,
             )
         )
         run.write_arena(arena.detect(run, segmenter))
-        _record_model(run, "arena", segmenter)
+        _record_model(run, "arena", segmenter.model_id)
     except BaseException:
         shutil.rmtree(run.path)
         raise
@@ -94,27 +99,30 @@ def confirm_arena(run: RunFolder) -> Arena:
     return confirmed
 
 
-def finish_run(run: RunFolder, segmenter: Segmenter) -> Metrics:
+def finish_run(run: RunFolder, segmenter: Segmenter, judge: Judge) -> Metrics:
     """Every stage after the arena gate, in order."""
     for stage in Stage:
-        run_stage(run, stage, segmenter)
+        run_stage(run, stage, segmenter, judge)
     return run.metrics()
 
 
-def run_stage(run: RunFolder, stage: Stage, segmenter: Segmenter) -> None:
+def run_stage(run: RunFolder, stage: Stage, segmenter: Segmenter, judge: Judge) -> None:
     """Run one stage after the arena gate. Raises ArenaNotConfirmedError, writing nothing, while
     the arena is unconfirmed."""
     match stage:
         case Stage.TRACK:
             track.run(run, segmenter)
-            _record_model(run, "track", segmenter)
+            _record_model(run, "track", segmenter.model_id)
         case Stage.MEASURE:
             measure.run(run)
+        case Stage.BEHAVIOURS:
+            behaviours.run(run, judge)
+            _record_model(run, "behaviours", judge.model_id)
         case Stage.QC:
             qc.run(run)
 
 
-def _record_model(run: RunFolder, stage: str, segmenter: Segmenter) -> None:
+def _record_model(run: RunFolder, stage: str, model_id: str) -> None:
     manifest = run.manifest()
-    models = {**manifest.models, stage: segmenter.model_id}
+    models = {**manifest.models, stage: model_id}
     run.write_manifest(manifest.model_copy(update={"models": models}))

@@ -24,6 +24,14 @@ def mask_shape(mask: NDArray[np.bool_]) -> MaskShape | None:
     return MaskShape(x_px=float(cols.mean()), y_px=float(rows.mean()), area_px=int(rows.size))
 
 
+def decode_mask(rle: str, height: int, width: int) -> NDArray[np.uint8]:
+    """A COCO RLE mask (counts only; the size is the video's) as a 0/1 array."""
+    with warnings.catch_warnings():
+        # pycocotools' Cython decoder predates NumPy 2's `copy` keyword; the result is right.
+        warnings.filterwarnings("ignore", "__array__ implementation", DeprecationWarning)
+        return coco_mask.decode({"size": [height, width], "counts": rle.encode("ascii")})
+
+
 def mask_changes(rles: Sequence[str | None], height: int, width: int) -> list[float | None]:
     """The change from each frame's mask to the next one's, None where either is missing."""
     return [
@@ -40,13 +48,7 @@ def mask_elongations(rles: Sequence[str | None], height: int, width: int) -> lis
 def _elongation(rle: str, height: int, width: int) -> float | None:
     """Major over minor axis of the ellipse with the mask's second moments: 1 for a disc, a / b
     for an ellipse with semi-axes a and b. None for a mask that is a line or a point."""
-    with warnings.catch_warnings():
-        # pycocotools' Cython decoder predates NumPy 2's `copy` keyword; the result is right.
-        warnings.filterwarnings("ignore", "__array__ implementation", DeprecationWarning)
-        decoded: NDArray[np.uint8] = coco_mask.decode(
-            {"size": [height, width], "counts": rle.encode("ascii")}
-        )
-    rows, cols = np.nonzero(decoded)
+    rows, cols = np.nonzero(decode_mask(rle, height, width))
     if rows.size < 2:
         return None
     (var_x, cov), (_, var_y) = np.cov(np.stack([cols, rows]).astype(np.float64)).tolist()

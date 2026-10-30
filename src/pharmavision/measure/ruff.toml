@@ -25,5 +25,6 @@ extend-select = ["TID251", "T20", "PTH123"]
 "pyarrow".msg = "measure/ does no I/O."
 "pharmavision.artifacts.RunFolder".msg = "measure/ takes artifacts as values; the stage reads and writes the run folder."
 "pharmavision.segmenter".msg = "measure/ makes no model calls."
+"pharmavision.judge".msg = "measure/ makes no model calls."
 "pharmavision.stages".msg = "measure/ is called by the stages, never the reverse."
 "pharmavision.pipeline".msg = "measure/ is called by the stages, never the reverse."
