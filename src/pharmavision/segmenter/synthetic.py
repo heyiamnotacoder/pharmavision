@@ -17,8 +17,10 @@ _SHIFT = 4
 
 class SyntheticSegmenter:
     """Ignores pixels and prompts: images always show `floor`, videos always show one animal
-    (a disc) at `trajectory(frame_index)`. Like SAM 3.1, it skips frames where the trajectory
-    returns None, and with `shuffle_seed` it delivers frames out of order."""
+    (a disc) at `trajectory(frame_index)`, and a second, less confident and larger object (an
+    intruding hand) at `intruder(frame_index)`. Like SAM 3.1, it skips frames where neither is
+    there, keeps the `max_objects` most confident, and with `shuffle_seed` delivers frames out of
+    order."""
 
     model_id = "synthetic"
 
@@ -27,11 +29,15 @@ class SyntheticSegmenter:
         floor: Sequence[Point] = (),
         trajectory: Callable[[int], Point | None] = lambda _: None,
         animal_radius_px: float = 8.0,
+        intruder: Callable[[int], Point | None] = lambda _: None,
+        intruder_radius_px: float = 30.0,
         shuffle_seed: int | None = None,
     ) -> None:
         self.floor = floor
         self.trajectory = trajectory
         self.animal_radius_px = animal_radius_px
+        self.intruder = intruder
+        self.intruder_radius_px = intruder_radius_px
         self.shuffle_seed = shuffle_seed
 
     def segment_image(self, image: NDArray[np.uint8], prompt: str) -> list[Mask]:
@@ -53,11 +59,18 @@ class SyntheticSegmenter:
         if self.shuffle_seed is not None:
             random.Random(self.shuffle_seed).shuffle(order)
         for index in order:
-            position = self.trajectory(index)
-            if position is not None:
-                yield FrameMasks(index, (Mask(self._disc(shape, position), confidence=0.9),))
+            objects = [
+                Mask(self._disc(shape, centre, radius), confidence=confidence)
+                for centre, radius, confidence in (
+                    (self.trajectory(index), self.animal_radius_px, 0.9),
+                    (self.intruder(index), self.intruder_radius_px, 0.5),
+                )
+                if centre is not None
+            ]
+            if objects:
+                yield FrameMasks(index, tuple(objects[:max_objects]))
 
-    def _disc(self, shape: tuple[int, int], centre: Point) -> NDArray[np.bool_]:
+    def _disc(self, shape: tuple[int, int], centre: Point, radius: float) -> NDArray[np.bool_]:
         canvas = np.zeros(shape, dtype=np.uint8)
         # Fixed-point coordinates (4 fractional bits) so the centroid isn't snapped to the grid.
         scale = 1 << _SHIFT
@@ -65,7 +78,7 @@ class SyntheticSegmenter:
         cv2.circle(
             canvas,
             (round(x * scale), round(y * scale)),
-            round(self.animal_radius_px * scale),
+            round(radius * scale),
             color=1,
             thickness=-1,
             shift=_SHIFT,

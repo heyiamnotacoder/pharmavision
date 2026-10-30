@@ -24,10 +24,10 @@ runs/<run_id>/
   manifest.json      # input hash, fps, frame size, test type, arena dims, code + model versions, measure settings
   video.mp4          # normalised video
   arena.json         # zone polygons (px) + px_per_cm, confirmed flag
-  track.parquet      # one row per frame: centroid, area, bbox, axes, orientation, mask RLE, gap flag
+  track.parquet      # one row per frame: centroid, area, bbox, axes, orientation, mask RLE, gap flag, second-mask area
   metrics.json       # per-animal metric table (measures)
   events.parquet     # behaviour events: start, end, label, confidence, source (rule | model)
-  qc.json            # flags with frame ranges and severity
+  qc.json            # flags with frame ranges, severity and reason; the exclusions they lead to
 ```
 
 Model responses live outside any one run, in `runs/model_cache/<model>/<prompt version>/<input
@@ -75,8 +75,10 @@ video format both SAM 3.1 and Muse Spark accept.
   template (1 by default, 2 for social tests via multi-object tracking).
 - Keep the mask per frame as RLE, plus derived shape features: centroid, area, bbox, major and
   minor axis, orientation and elongation.
-- Frames with no mask, or more masks than expected, are marked as gaps. Interpolation happens in
-  stage 4, not here.
+- Frames with no mask are marked as gaps. Interpolation happens in stage 4, not here.
+- The stage asks for one object more than the template expects and keeps the largest other
+  mask's area per frame (`second_area_px`), so stage 6 can flag an intruding hand. The extra
+  object doesn't change the SAM cache key: the backend filters after the response.
 
 **The call** (confirmed in Meta's docs):
 - Upload the video once with `POST /v1/files` (`purpose=user_data`, up to 1 GiB, ready on a `200`).
@@ -155,9 +157,19 @@ purity.
 - Events are written with `source = model`. Low-confidence events go to the QC review list.
 
 ### 6. QC (measures, then judges)
-- Deterministic flags: tracking-loss %, out-of-arena frames, centroid jumps above physical maximum
-  speed, a second large mask (experimenter's hand). SAM 3.1 is also prompted with "hand" and "glove"
-  on flagged windows.
+- Deterministic flags (`measure/qc.py`, T6a), on the raw track, with every threshold in a
+  versioned `QcSettings` recorded in the manifest:
+
+  | Flag | Rule | Severity |
+  |---|---|---|
+  | `tracking_loss` | each gap too long to interpolate | warning |
+  | `tracking_loss`, whole trial | animal missing on more than `max_tracking_loss_fraction` (5%) of frames | critical: the trial is excluded |
+  | `out_of_arena` | centroid at least `out_of_arena_margin_cm` (2 cm) outside the floor | warning |
+  | `speed_jump` | a step between consecutive detections faster than `max_speed_cm_s` (100 cm/s) | warning |
+  | `second_mask` | another mask of at least `second_mask_min_area_cm2` (10 cm²) in the frame | warning |
+
+  Only critical flags exclude anything; warnings are listed and go to the model review below.
+  SAM 3.1 is also prompted with "hand" and "glove" on flagged windows.
 - Muse Spark reviews only the flagged windows and returns `{verdict: exclude_window | keep | exclude_trial, reason}`.
 - Every exclusion is listed in the report. Nothing is dropped silently.
 - Verdicts apply automatically. Zone confirmation stays the only human gate; low-confidence events
