@@ -14,7 +14,6 @@ from pharmavision.artifacts import Gap, MeasureSettings, RearCandidate
 from pharmavision.pipeline import (
     ArenaNotConfirmedError,
     ArenaNotFoundError,
-    RunFolder,
     Stage,
     VideoTooShortError,
     confirm_arena,
@@ -23,43 +22,9 @@ from pharmavision.pipeline import (
     start_run,
 )
 from pharmavision.segmenter.synthetic import SyntheticSegmenter
-from pharmavision.templates import OPEN_FIELD
 
+from .scenes import FLOOR, N_FRAMES, PX_PER_CM, TEMPLATE, circle_walk, finished_run
 from .videos import make_video
-
-TEMPLATE = OPEN_FIELD.model_copy(update={"protocol_duration_s": 3.0})
-
-# A 300 px square floor in a 360 px frame: 45 cm / 300 px.
-FLOOR = [(30.0, 30.0), (330.0, 30.0), (330.0, 330.0), (30.0, 330.0)]
-PX_PER_CM = 300 / 45
-N_FRAMES = 60  # 4 s at 15 fps
-
-
-def circle_walk(radius_px: float, laps: int = 1) -> Callable[[int], tuple[float, float]]:
-    """Centre of the floor, constant speed, ending where it started on the last frame."""
-
-    def position(frame: int) -> tuple[float, float]:
-        angle = 2 * math.pi * laps * frame / (N_FRAMES - 1)
-        return (180 + radius_px * math.cos(angle), 180 + radius_px * math.sin(angle))
-
-    return position
-
-
-def finished_run(
-    tmp_path: Path,
-    runs_dir: Path,
-    trajectory: Callable[[int], tuple[float, float] | None],
-    body: Callable[[int], tuple[float, float]] = lambda _: (8.0, 8.0),
-    measure_settings: MeasureSettings | None = None,
-) -> RunFolder:
-    """A run through every stage, on a 4 s video, with the animal at `trajectory(frame)`, its
-    body an ellipse with semi-axes `body(frame)` (along x, along y)."""
-    video = make_video(tmp_path / "trial.mp4", seconds=4)
-    segmenter = SyntheticSegmenter(floor=FLOOR, trajectory=trajectory, body=body)
-    run = start_run(video, TEMPLATE, segmenter, runs_dir, measure_settings=measure_settings)
-    confirm_arena(run)
-    finish_run(run, segmenter)
-    return run
 
 
 def ffprobe_streams(video: Path) -> list[dict[str, str]]:
@@ -134,7 +99,7 @@ def test_arena_derives_the_centre_zone_and_scale_from_the_floor(
     assert floor.contains(centre)
 
 
-@pytest.mark.parametrize("stage", [Stage.TRACK, Stage.MEASURE])
+@pytest.mark.parametrize("stage", [Stage.TRACK, Stage.MEASURE, Stage.QC])
 def test_stages_after_arena_refuse_an_unconfirmed_arena(
     stage: Stage, tmp_path: Path, runs_dir: Path
 ) -> None:
@@ -370,6 +335,9 @@ def test_the_same_video_and_settings_give_identical_metrics(tmp_path: Path, runs
     first, second = (run.metrics() for run in runs)
     assert first.distance_travelled_cm is not None
     assert first == second
+    for artifact in ("metrics.json", "qc.json"):
+        assert (runs[0].path / artifact).read_bytes() == (runs[1].path / artifact).read_bytes()
+
     assert (runs[0].path / "metrics.json").read_bytes() == (
         runs[1].path / "metrics.json"
     ).read_bytes()

@@ -14,7 +14,8 @@ def run(run: RunFolder, segmenter: Segmenter) -> None:
     manifest = run.manifest()
     template, n_frames = manifest.template, manifest.video.n_frames
     by_frame_index: dict[int, TrackFrame] = {}
-    stream = segmenter.track_video(run.video_path, template.animal_prompt, template.max_animals)
+    # One object more than expected, so QC sees an intruding one (a hand) beside the animal.
+    stream = segmenter.track_video(run.video_path, template.animal_prompt, template.max_animals + 1)
     for frame in stream:
         if not 0 <= frame.frame_index < n_frames:
             raise ValueError(
@@ -28,11 +29,14 @@ def run(run: RunFolder, segmenter: Segmenter) -> None:
 
 
 def _animal_in(frame: FrameMasks) -> TrackFrame | None:
-    """The single animal: the best mask in the frame, or None (a gap) when there is none."""
-    best = best_mask([m for m in frame.masks if m.pixels.any()])
+    """The single animal: the best mask in the frame, or None (a gap) when there is none. The
+    largest of the other masks is kept as an area, for QC."""
+    masks = [m for m in frame.masks if m.pixels.any()]
+    best = best_mask(masks)
     shape = mask_shape(best.pixels) if best else None
     if best is None or shape is None:
         return None
+    others = [int(m.pixels.sum()) for m in masks if m is not best]
     return TrackFrame(
         frame_index=frame.frame_index,
         detected=True,
@@ -41,6 +45,7 @@ def _animal_in(frame: FrameMasks) -> TrackFrame | None:
         area_px=shape.area_px,
         confidence=best.confidence,
         mask_rle=_rle(best.pixels),
+        second_area_px=max(others, default=0),
     )
 
 

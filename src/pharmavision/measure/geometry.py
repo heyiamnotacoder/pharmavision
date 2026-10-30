@@ -60,6 +60,14 @@ def signed_distance(points: Sequence[Point], polygon: Sequence[Point]) -> list[f
     return signed
 
 
+def signed_distance_per_frame(
+    points: Sequence[Point | None], polygon: Sequence[Point]
+) -> list[float | None]:
+    """`signed_distance` for each frame's point, in frame order, None where it is unknown."""
+    known = iter(signed_distance([p for p in points if p is not None], polygon))
+    return [None if p is None else next(known) for p in points]
+
+
 def _signed_area(polygon: Sequence[Point]) -> float:
     return sum(x0 * y1 - x1 * y0 for (x0, y0), (x1, y1) in _edges(polygon)) / 2
 

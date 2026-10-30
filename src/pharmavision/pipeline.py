@@ -1,5 +1,5 @@
 """The pipeline entry: the one test seam. A run goes ingest → arena, stops at the arena gate,
-and continues with track → measure once a human confirms the zones."""
+and continues with track → measure → QC once a human confirms the zones."""
 
 import shutil
 import uuid
@@ -16,10 +16,11 @@ from .artifacts import (
     Manifest,
     MeasureSettings,
     Metrics,
+    QcSettings,
     RunFolder,
 )
 from .segmenter import Segmenter
-from .stages import arena, ingest, measure, track
+from .stages import arena, ingest, measure, qc, track
 from .stages.arena import ArenaNotFoundError
 from .stages.ingest import VideoTooShortError
 from .templates import TestTemplate
@@ -42,6 +43,7 @@ class Stage(StrEnum):
 
     TRACK = "track"
     MEASURE = "measure"
+    QC = "qc"
 
 
 def start_run(
@@ -52,6 +54,7 @@ def start_run(
     ingest_settings: IngestSettings | None = None,
     arena_settings: ArenaSettings | None = None,
     measure_settings: MeasureSettings | None = None,
+    qc_settings: QcSettings | None = None,
 ) -> RunFolder:
     """Ingest the video into a new run folder and detect the arena, which waits unconfirmed.
     All or nothing: if the video is too short or no floor is found, no run folder is left."""
@@ -71,6 +74,7 @@ def start_run(
                 ingest=ingest_settings,
                 arena=arena_settings or ArenaSettings(),
                 measure=measure_settings or MeasureSettings(),
+                qc=qc_settings or QcSettings(),
                 source=source,
                 video=normalised,
             )
@@ -106,6 +110,8 @@ def run_stage(run: RunFolder, stage: Stage, segmenter: Segmenter) -> None:
             _record_model(run, "track", segmenter)
         case Stage.MEASURE:
             measure.run(run)
+        case Stage.QC:
+            qc.run(run)
 
 
 def _record_model(run: RunFolder, stage: str, segmenter: Segmenter) -> None:

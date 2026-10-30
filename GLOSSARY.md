@@ -20,6 +20,14 @@ _Avoid_: Experiment, batch, project
 A stretch of consecutive frames where the tracker found no animal. Short gaps are bridged by linear interpolation; longer ones stay missing in every metric and go to QC.
 _Avoid_: Dropout, missing frame (for the whole run)
 
+**Flag**:
+A QC finding over a frame range, with a reason and a severity. A warning is listed in the report; a critical flag leads to an exclusion.
+_Avoid_: Alert, error, issue
+
+**Exclusion**:
+Frames, or a whole trial, left out of the statistics, with the reason and whether a rule or the model decided it. Every exclusion is listed; nothing is dropped silently.
+_Avoid_: Rejection, filter, drop
+
 **Rear candidate**:
 A window of frames where the animal may be rearing: its mask shrank and changed shape while it stayed in place. Found by rules in the measure stage, then judged by the behaviours stage; a candidate is never counted as a rear itself.
 _Avoid_: Rear, rearing event (for an unjudged window)

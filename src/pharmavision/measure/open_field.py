@@ -2,7 +2,7 @@
 
 from ..artifacts import Arena, MeasureSettings, Metrics, NormalisedVideo, Track
 from .distance import distance_travelled_cm, mean_velocity_cm_s, speeds_cm_s
-from .geometry import Point, signed_distance
+from .geometry import signed_distance, signed_distance_per_frame
 from .immobility import immobility_s
 from .rears import rear_candidates
 from .shape import mask_changes, mask_elongations
@@ -25,7 +25,7 @@ def open_field_metrics(
     )
     known = [p for p in trajectory.points if p is not None]
     centre = zone_occupancy(
-        _per_frame(trajectory.points, signed_distance(known, arena.centre_px)),
+        signed_distance_per_frame(trajectory.points, arena.centre_px),
         fps,
         settings.zone_hysteresis_cm * arena.px_per_cm,
         settings.min_dwell_s,
@@ -52,9 +52,3 @@ def open_field_metrics(
             settings,
         ),
     )
-
-
-def _per_frame(points: list[Point | None], known_values: list[float]) -> list[float | None]:
-    """Values computed for the known points, put back in frame order with None for the rest."""
-    values = iter(known_values)
-    return [None if p is None else next(values) for p in points]
