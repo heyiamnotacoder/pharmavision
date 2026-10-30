@@ -4,11 +4,8 @@ range and reason, and the exclusions they lead to. Nothing is dropped silently."
 from pathlib import Path
 
 from pharmavision.artifacts import Qc, QcSettings
-from pharmavision.pipeline import confirm_arena, finish_run, start_run
-from pharmavision.segmenter.synthetic import SyntheticSegmenter
 
-from .scenes import FLOOR, N_FRAMES, PX_PER_CM, TEMPLATE, circle_walk, finished_run
-from .videos import make_video
+from .scenes import N_FRAMES, PX_PER_CM, circle_walk, finished_run
 
 
 def flagged(qc: Qc) -> list[tuple[str, int, int, str]]:
@@ -45,6 +42,7 @@ def test_a_brief_loss_is_flagged_but_keeps_the_trial(tmp_path: Path, runs_dir: P
 
     qc = run.qc()
     assert flagged(qc) == [("tracking_loss", 0, 1, "warning")]
+    assert "start of the video" in qc.flags[0].reason
     assert qc.exclusions == []
     assert not qc.trial_excluded
 
@@ -81,6 +79,17 @@ def test_a_centroid_jump_faster_than_a_mouse_runs_is_flagged(
     assert qc.exclusions == []
 
 
+def test_a_mis_detection_lasting_several_frames_is_one_flag_over_all_of_them(
+    tmp_path: Path, runs_dir: Path
+) -> None:
+    # Detected 80 px away on frames 30-34: a jump out at 29-30 and back at 34-35.
+    run = finished_run(
+        tmp_path, runs_dir, lambda i: (260.0, 180.0) if 30 <= i < 35 else (180.0, 180.0)
+    )
+
+    assert flagged(run.qc()) == [("speed_jump", 29, 35, "warning")]
+
+
 def test_a_second_large_mask_beside_the_animal_is_flagged(tmp_path: Path, runs_dir: Path) -> None:
     # A hand-sized disc (30 px radius, about 64 cm²) on frames 40-49, away from a still animal.
     run = finished_run(
@@ -101,16 +110,16 @@ def test_the_manifest_records_the_versioned_qc_thresholds_and_they_decide(
     tmp_path: Path, runs_dir: Path
 ) -> None:
     # The same 17% loss as above, under a 20% limit: flagged, not excluded.
-    video = make_video(tmp_path / "trial.mp4", seconds=4)
-    segmenter = SyntheticSegmenter(
-        floor=FLOOR, trajectory=lambda i: None if 20 <= i < 30 else (180.0, 180.0)
-    )
     lenient = QcSettings(max_tracking_loss_fraction=0.2)
-    run = start_run(video, TEMPLATE, segmenter, runs_dir, qc_settings=lenient)
-    confirm_arena(run)
-    finish_run(run, segmenter)
+    run = finished_run(
+        tmp_path,
+        runs_dir,
+        lambda i: None if 20 <= i < 30 else (180.0, 180.0),
+        qc_settings=lenient,
+    )
 
     assert run.manifest().qc == lenient
     assert run.manifest().qc.version == 1
     assert flagged(run.qc()) == [("tracking_loss", 20, 29, "warning")]
+    assert "too long to interpolate" in run.qc().flags[0].reason
     assert run.qc().exclusions == []

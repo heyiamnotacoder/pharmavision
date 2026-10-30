@@ -17,11 +17,11 @@ from ..artifacts import (
     Severity,
     Track,
 )
-from .geometry import signed_distance
+from .geometry import signed_distance_per_frame
 from .stretches import stretches
 
 
-def qc_flags(
+def trial_qc(
     track: Track,
     arena: Arena,
     gaps: Sequence[Gap],
@@ -29,41 +29,60 @@ def qc_flags(
     settings: QcSettings,
 ) -> Qc:
     """Every flag for one trial, in frame order per kind, and the exclusions the critical ones
-    lead to. `gaps` are the measure stage's: only gaps too long to interpolate are flagged."""
-    flags = [_kept_gap(gap, video.fps) for gap in gaps if not gap.interpolated]
+    lead to. `gaps` are the measure stage's: only gaps it could not interpolate are flagged."""
+    n_frames = len(track.frames)
+    flags = [_kept_gap(gap, video.fps, n_frames) for gap in gaps if not gap.interpolated]
     flags += _out_of_arena(track, arena, settings.out_of_arena_margin_cm)
-    flags += _speed_jumps(track, arena.px_per_cm, video.fps, settings.max_speed_cm_s)
+    flags += _speed_jumps(
+        track, arena.px_per_cm, video.fps, settings.max_speed_cm_s, settings.speed_jump_join_s
+    )
     flags += _second_masks(track, arena.px_per_cm, settings.second_mask_min_area_cm2)
     exclusions: list[Exclusion] = []
-    n_frames = len(track.frames)
-    lost = sum(not f.detected for f in track.frames)
-    if n_frames and lost / n_frames > settings.max_tracking_loss_fraction:
-        reason = (
-            f"animal not found on {lost / n_frames:.0%} of frames ({lost} of {n_frames}), "
-            f"above the {settings.max_tracking_loss_fraction:.0%} limit"
-        )
-        flags.append(_flag("tracking_loss", 0, n_frames - 1, reason, "critical"))
+    loss = _trial_loss(track, settings.max_tracking_loss_fraction)
+    if loss is not None:
+        flags.append(loss)
         exclusions.append(
             Exclusion(
-                scope="trial", first_frame=0, last_frame=n_frames - 1, reason=reason, source="rule"
+                scope="trial",
+                first_frame=loss.first_frame,
+                last_frame=loss.last_frame,
+                reason=loss.reason,
+                source="rule",
             )
         )
     return Qc(flags=flags, exclusions=exclusions)
 
 
-def _kept_gap(gap: Gap, fps: float) -> QcFlag:
+def _kept_gap(gap: Gap, fps: float, n_frames: int) -> QcFlag:
     seconds = (gap.last_frame - gap.first_frame + 1) / fps
-    reason = f"animal not found for {seconds:.1f} s, too long to interpolate"
+    if gap.first_frame == 0:
+        why = "at the start of the video, with no frame before it to interpolate from"
+    elif gap.last_frame == n_frames - 1:
+        why = "at the end of the video, with no frame after it to interpolate from"
+    else:
+        why = "too long to interpolate"
+    reason = f"animal not found for {seconds:.1f} s, {why}"
     return _flag("tracking_loss", gap.first_frame, gap.last_frame, reason)
+
+
+def _trial_loss(track: Track, max_fraction: float) -> QcFlag | None:
+    """A critical flag over the whole trial when the animal is missing on more than
+    `max_fraction` of its frames; None otherwise."""
+    n_frames = len(track.frames)
+    lost = sum(not f.detected for f in track.frames)
+    if not n_frames or lost / n_frames <= max_fraction:
+        return None
+    reason = (
+        f"animal not found on {lost / n_frames:.0%} of frames ({lost} of {n_frames}), "
+        f"above the {max_fraction:.0%} limit"
+    )
+    return _flag("tracking_loss", 0, n_frames - 1, reason, "critical")
 
 
 def _out_of_arena(track: Track, arena: Arena, margin_cm: float) -> list[QcFlag]:
     """Each stretch of frames whose centroid is `margin_cm` or more outside the floor."""
-    outside_cm: list[float | None] = [None] * len(track.frames)
-    known = [(f.frame_index, f.position) for f in track.frames if f.position is not None]
-    distances = signed_distance([p for _, p in known], arena.floor_px)
-    for (index, _), distance in zip(known, distances, strict=True):
-        outside_cm[index] = -distance / arena.px_per_cm
+    distances = signed_distance_per_frame([f.position for f in track.frames], arena.floor_px)
+    outside_cm = [None if d is None else -d / arena.px_per_cm for d in distances]
     return [
         _flag(
             "out_of_arena",
@@ -75,16 +94,19 @@ def _out_of_arena(track: Track, arena: Arena, margin_cm: float) -> list[QcFlag]:
     ]
 
 
-def _speed_jumps(track: Track, px_per_cm: float, fps: float, max_cm_s: float) -> list[QcFlag]:
-    """Steps between consecutive detections (across a gap too) faster than `max_cm_s`. Steps
-    that share a frame join one flag, so a one-frame mis-detection is one flag over 3 frames."""
+def _speed_jumps(
+    track: Track, px_per_cm: float, fps: float, max_cm_s: float, join_s: float
+) -> list[QcFlag]:
+    """Steps between consecutive detections (across a gap too) faster than `max_cm_s`. Jumps
+    at most `join_s` apart join one flag over the frames between them, so a one-frame
+    mis-detection is one flag over 3 frames, and a longer one is one flag over all of it."""
     detected = [(f.frame_index, f.position) for f in track.frames if f.position is not None]
     jumps: list[tuple[int, int, float]] = []
     for (a, pa), (b, pb) in itertools.pairwise(detected):
         speed = math.dist(pa, pb) / px_per_cm / ((b - a) / fps)
         if speed <= max_cm_s:
             continue
-        if jumps and jumps[-1][1] == a:
+        if jumps and (a - jumps[-1][1]) / fps <= join_s:
             first, _, fastest = jumps.pop()
             jumps.append((first, b, max(fastest, speed)))
         else:

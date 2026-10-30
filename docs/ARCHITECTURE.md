@@ -165,11 +165,17 @@ purity.
   | `tracking_loss` | each gap too long to interpolate | warning |
   | `tracking_loss`, whole trial | animal missing on more than `max_tracking_loss_fraction` (5%) of frames | critical: the trial is excluded |
   | `out_of_arena` | centroid at least `out_of_arena_margin_cm` (2 cm) outside the floor | warning |
-  | `speed_jump` | a step between consecutive detections faster than `max_speed_cm_s` (100 cm/s) | warning |
+  | `speed_jump` | a step between consecutive detections faster than `max_speed_cm_s` (100 cm/s); jumps within `speed_jump_join_s` (1 s) join one flag, so a multi-frame mis-detection is covered whole | warning |
   | `second_mask` | another mask of at least `second_mask_min_area_cm2` (10 cm²) in the frame | warning |
 
   Only critical flags exclude anything; warnings are listed and go to the model review below.
   SAM 3.1 is also prompted with "hand" and "glove" on flagged windows.
+- **Known limits of `second_mask`** (measure on the laptop before trusting it): the second mask
+  is the next instance of the *animal* prompt, so real SAM 3.1 may rarely give one for a hand,
+  and may give one for a reflection. A hand seen while the animal is not is tracked *as* the
+  animal and shows up as a `speed_jump`, not a `second_mask`. The "hand" / "glove" prompts
+  (T6b) are the real hand detector. With two animals per video (FR-S3) the rule must look at
+  the third mask instead.
 - Muse Spark reviews only the flagged windows and returns `{verdict: exclude_window | keep | exclude_trial, reason}`.
 - Every exclusion is listed in the report. Nothing is dropped silently.
 - Verdicts apply automatically. Zone confirmation stays the only human gate; low-confidence events

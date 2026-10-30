@@ -102,6 +102,9 @@ class QcSettings(Artifact):
     max_speed_cm_s: float = Field(default=100.0, gt=0)
     """Faster than a mouse runs in an open field, so a faster step between two detections is a
     mis-detection, not movement. Walking is a few cm/s."""
+    speed_jump_join_s: float = Field(default=1.0, ge=0)
+    """Jumps this close together join one flag, so a mis-detection that lasts several frames
+    (a jump out, then one back) is flagged over all of its frames."""
 
 
 class Manifest(Artifact):
