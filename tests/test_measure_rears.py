@@ -8,7 +8,7 @@ import pytest
 from pycocotools import mask as coco_mask
 
 from pharmavision.artifacts import MeasureSettings, RearCandidate, RearFeatures, RearScorer
-from pharmavision.measure.rears import rear_candidates, rear_count
+from pharmavision.measure.rears import rear_candidates
 from pharmavision.measure.shape import mask_elongations
 
 FPS = 10.0
@@ -147,7 +147,7 @@ def test_the_score_is_the_logistic_of_the_weighted_features() -> None:
         mean_speed_cm_s=-0.5,
         mean_area_cm2=0.0,
     )
-    scorer = RearScorer(intercept=-1.0, weights=weights, threshold=0.5)
+    scorer = RearScorer(intercept=-1.0, weights=weights)
     settings = SETTINGS.model_copy(update={"rear_scorer": scorer})
     areas = [100.0] * 40 + [50.0] * 10 + [100.0] * 50
     elongations = [2.0] * 40 + [3.0] * 10 + [2.0] * 50
@@ -157,20 +157,3 @@ def test_the_score_is_the_logistic_of_the_weighted_features() -> None:
 
     # -1 + 1.0 * 1.0 + 2.0 * 0.5 - 1.0 * 0.5 - 0.5 * 2.0 = -0.5
     assert found.score == pytest.approx(1 / (1 + math.exp(0.5)))
-
-
-def test_the_rear_count_is_the_candidates_scoring_at_least_the_threshold() -> None:
-    def scored(score: float) -> RearCandidate:
-        features = RearFeatures(
-            duration_s=1,
-            area_drop=0,
-            mean_area_drop=0,
-            elongation_change=0,
-            mean_speed_cm_s=0,
-            mean_area_cm2=5,
-        )
-        return RearCandidate(first_frame=0, last_frame=9, features=features, score=score)
-
-    found = [scored(0.2), scored(0.5), scored(0.9)]
-
-    assert rear_count(found, SETTINGS.rear_scorer.model_copy(update={"threshold": 0.5})) == 2

@@ -95,11 +95,6 @@ def rear_score(features: RearFeatures, scorer: RearScorer) -> float:
     return 1 / (1 + math.exp(-z))
 
 
-def rear_count(candidates: Sequence[RearCandidate], scorer: RearScorer) -> int:
-    """The candidates the scorer counts as rears: a score at least its threshold."""
-    return sum(c.score >= scorer.threshold for c in candidates)
-
-
 def _running_median(values: Sequence[float | None], window: int) -> list[float]:
     """The median of the known values within `window // 2` frames either side of each frame;
     NaN where none is known, which fails every comparison. Unlike the trajectory's filter it

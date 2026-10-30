@@ -1,7 +1,9 @@
 """Fit the measured rear scorer on the train split and check it on the eval split (laptop only).
-Settles ADR 0002: rear counts come from mask features, not from Muse Spark's labels.
+Settles ADR 0003: the score is good evidence per candidate, but no per-video rear count from it
+agrees with the raters.
 
 Usage:
+  uv run python -m spike.rear_scorer track  # download and track the 14 eval videos (~$25, once)
   uv run python -m spike.rear_scorer fit    # fit on the 6 train videos, leave-one-video-out
   uv run python -m spike.rear_scorer eval   # the fitted defaults on the 14 eval videos
 
@@ -11,9 +13,9 @@ overlaps a consensus rear (at least two raters), not a rear when no rater marked
 features (`RearFeatures`), fitted with numpy on standardised features and written back in the
 features' own units, ready to paste into `MeasureSettings.rear_scorer`.
 
-Counts, as FR-6 asks: per video, the candidates the scorer counts against each rater's number
-of rears, beside the raters against each other. Needs `python -m spike.rear_recall` (train runs)
-and the eval runs tracked the same way.
+Counts, as FR-6 asks: per video, the candidates scoring at least a count threshold (set on the
+train split's counts, kept in fit.json only) against each rater's number of rears, beside the
+raters against each other. Needs `python -m spike.rear_recall` first (the train runs).
 """
 
 import json
@@ -27,10 +29,15 @@ import numpy as np
 from numpy.typing import NDArray
 
 from pharmavision.artifacts import MeasureSettings, RearCandidate, RearFeatures, RearScorer
+from pharmavision.judge.muse_spark import MuseSparkJudge, MuseSparkSettings
 from pharmavision.measure.open_field import open_field_metrics
 from pharmavision.measure.rears import rear_score
-from pharmavision.pipeline import RunFolder
-from spike.data import LABELS, SPLIT
+from pharmavision.pipeline import RunFolder, Stage, confirm_arena, run_stage, start_run
+from pharmavision.segmenter.config import make_segmenter
+from pharmavision.segmenter.meta_api import MetaApiSettings
+from pharmavision.stages.arena import ArenaNotFoundError
+from pharmavision.templates import OPEN_FIELD
+from spike.data import LABELS, SPLIT, VIDEOS, download
 from spike.rear_recall import OUT as RUNS
 from spike.rears import Agreement, Rear, agreement, consensus_rears, load_rears
 
@@ -38,6 +45,7 @@ OUT = Path("eval/data/spike/rear_scorer")
 MARGIN_S = 1.0  # a negative candidate is this far from any rater's rear
 L2 = 1e-3  # ridge penalty on the standardised weights, for a stable fit
 FEATURES = list(RearFeatures.model_fields)
+FLOOR_PROMPTS = ["square floor", "white floor", "open field arena", "floor", "box"]
 
 
 @dataclass(frozen=True)
@@ -99,7 +107,7 @@ def matrix(videos: list[Video]) -> tuple[NDArray[np.float64], NDArray[np.float64
     return np.array([x for x, _ in rows]), np.array([y for _, y in rows], dtype=np.float64)
 
 
-def fit(x: NDArray[np.float64], y: NDArray[np.float64], threshold: float) -> RearScorer:
+def fit(x: NDArray[np.float64], y: NDArray[np.float64]) -> RearScorer:
     """Ridge logistic regression by gradient descent on standardised features, returned in the
     features' own units."""
     mu, sd = x.mean(axis=0), x.std(axis=0) + 1e-12
@@ -114,7 +122,6 @@ def fit(x: NDArray[np.float64], y: NDArray[np.float64], threshold: float) -> Rea
     return RearScorer(
         intercept=intercept,
         weights=RearFeatures(**{f: float(v) for f, v in zip(FEATURES, weights, strict=True)}),
-        threshold=threshold,
     )
 
 
@@ -206,10 +213,11 @@ def calibrated_threshold(videos: list[Video], scorer: RearScorer) -> float:
     return float(min(grid, key=lambda t: abs(sum(s >= t for s in scores) - target)))
 
 
-def calibrated(videos: list[Video]) -> RearScorer:
-    """Weights fitted on the videos' labelled candidates, then the threshold set on their counts."""
-    scorer = fit(*matrix(videos), threshold=0.5)
-    return scorer.model_copy(update={"threshold": calibrated_threshold(videos, scorer)})
+def calibrated(videos: list[Video]) -> tuple[RearScorer, float]:
+    """Weights fitted on the videos' labelled candidates, and a count threshold set on their
+    counts. The threshold lives here only: the pipeline makes no count (ADR 0003)."""
+    scorer = fit(*matrix(videos))
+    return scorer, calibrated_threshold(videos, scorer)
 
 
 def fit_train() -> None:
@@ -220,13 +228,14 @@ def fit_train() -> None:
     held_out: list[Video] = []
     thresholds: list[float] = []
     for k, v in enumerate(videos):
-        scorer = calibrated(videos[:k] + videos[k + 1 :])
+        scorer, threshold = calibrated(videos[:k] + videos[k + 1 :])
         held_out += rescored([v], scorer)
-        thresholds.append(scorer.threshold)
-    final = calibrated(videos)
+        thresholds.append(threshold)
+    final, count_threshold = calibrated(videos)
     summary = {
         "settings_version": settings.version,
         "scorer": final.model_dump(),
+        "count_threshold": count_threshold,
         "lovo_thresholds": thresholds,
         "lovo_candidates": candidate_scores(held_out, thresholds),
         "lovo_counts": count_agreement(held_out, thresholds),
@@ -239,19 +248,51 @@ def fit_train() -> None:
 def eval_split() -> None:
     settings = MeasureSettings()
     held_out: list[str] = json.loads(SPLIT.read_text())["eval"]
+    # The count threshold set on the train split by `fit`, as the settings carry none.
+    threshold: float = json.loads((OUT / "fit.json").read_text())["count_threshold"]
     videos = load([v for v in held_out if (RUNS / f"{v}.run").exists()], settings)
     summary = {
         "settings_version": settings.version,
         "scorer": settings.rear_scorer.model_dump(),
         "videos": [v.video_id for v in videos],
-        "candidates": candidate_scores(videos, [settings.rear_scorer.threshold] * len(videos)),
-        "counts": count_agreement(videos, [settings.rear_scorer.threshold] * len(videos)),
+        "count_threshold": threshold,
+        "candidates": candidate_scores(videos, [threshold] * len(videos)),
+        "counts": count_agreement(videos, [threshold] * len(videos)),
     }
     (OUT / "eval.json").write_text(json.dumps(summary, indent=2) + "\n")
     print(json.dumps({k: v for k, v in summary.items() if k != "counts"}, indent=2))
     print(json.dumps(summary["counts"]["mean"], indent=2))
 
 
+def track() -> None:
+    """Track each eval video once, as `spike.rear_recall` tracks the train videos. Where SAM 3.1
+    finds no "square floor", the other floor prompts are tried in order (OFT_12 and OFT_52 took
+    "white floor", OFT_39 "floor"; px/cm stayed within 7.26-7.45 on all 20 videos)."""
+    segmenter = make_segmenter(MetaApiSettings())
+    for video_id in json.loads(SPLIT.read_text())["eval"]:
+        pointer = RUNS / f"{video_id}.run"
+        if pointer.exists():
+            continue
+        download(video_id)
+        for prompt in FLOOR_PROMPTS:
+            template = OPEN_FIELD.model_copy(update={"floor_prompt": prompt})
+            try:
+                run = start_run(VIDEOS / f"{video_id}.mp4", template, segmenter, RUNS / "runs")
+                break
+            except ArenaNotFoundError:
+                print(f"{video_id}: no {prompt!r}", flush=True)
+        else:
+            print(f"{video_id}: skipped, no arena found", flush=True)
+            continue
+        confirm_arena(run)
+        # Track only: the judge is never called.
+        judge = MuseSparkJudge(MuseSparkSettings(tier="contributor"))
+        run_stage(run, Stage.TRACK, segmenter, judge)
+        pointer.write_text(f"{run.path}\n")
+        frames = run.track().frames
+        print(f"{video_id}: {prompt!r}, {sum(f.detected for f in frames)}/{len(frames)} tracked")
+
+
 if __name__ == "__main__":
     OUT.mkdir(parents=True, exist_ok=True)
-    {"fit": fit_train, "eval": eval_split}[sys.argv[1]]()
+    {"track": track, "fit": fit_train, "eval": eval_split}[sys.argv[1]]()

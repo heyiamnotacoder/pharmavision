@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: accepted; point 1 superseded by ADR 0003 (no rear counts)
 ---
 
 # Rear counts come from a measured scorer; Muse Spark is a second opinion

@@ -4,7 +4,7 @@ from ..artifacts import Arena, MeasureSettings, Metrics, NormalisedVideo, Track
 from .distance import distance_travelled_cm, mean_velocity_cm_s, speeds_cm_s
 from .geometry import signed_distance, signed_distance_per_frame
 from .immobility import immobility_s
-from .rears import rear_candidates, rear_count
+from .rears import rear_candidates
 from .shape import mask_changes, mask_elongations
 from .trajectory import clean_trajectory
 from .zones import zone_occupancy
@@ -53,5 +53,4 @@ def open_field_metrics(
         ),
         gaps=trajectory.gaps,
         rear_candidates=candidates,
-        rear_count=rear_count(candidates, settings.rear_scorer) if known else None,
     )

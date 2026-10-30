@@ -80,13 +80,13 @@ class RearFeatures(Artifact):
 
 class RearScorer(Artifact):
     """A logistic score over a candidate's features, fitted on the train split's rater labels:
-    1 / (1 + exp(-(intercept + sum of weight x feature))). A candidate is counted as a rear when
-    its score is at least `threshold` (ADR 0002)."""
+    1 / (1 + exp(-(intercept + sum of weight x feature))). Evidence per candidate only: summed
+    or thresholded, it does not give a per-video rear count that agrees with the raters, so no
+    count is made from it (ADR 0003)."""
 
     intercept: float
     weights: RearFeatures
     """One weight per feature, in that feature's units."""
-    threshold: float = Field(ge=0, le=1)
 
 
 class MeasureSettings(Artifact):
@@ -139,9 +139,8 @@ class MeasureSettings(Artifact):
             mean_speed_cm_s=-0.06692,
             mean_area_cm2=-0.1449,
         ),
-        threshold=0.55,
     )
-    """Fitted on the 6 train videos by `python -m spike.rear_scorer fit` (ADR 0002): longer
+    """Fitted on the 6 train videos by `python -m spike.rear_scorer fit` (ADR 0003): longer
     windows with a deeper but brief area drop and a smaller mask score higher."""
 
     @model_validator(mode="after")
@@ -329,15 +328,12 @@ class Metrics(Artifact):
     immobility_s: float | None
     gaps: list[Gap]
     rear_candidates: list[RearCandidate]
-    rear_count: int | None
-    """Rear candidates scoring at least the scorer's threshold (ADR 0002); None without any
-    tracked frame."""
 
 
 class BehaviourEvent(Artifact):
     """One judged rear candidate over frames `first_frame` to `last_frame` (inclusive): the
     candidate's own window, though the model saw a clip around it. Every candidate gets one, so
-    each verdict is auditable; a rear count is the events labelled "rearing". For a window
+    each verdict is auditable; it is a second opinion, never counted (ADR 0003). For a window
     longer than `BehaviourSettings.clip_max_s` the model saw only its middle: rears last about
     a second, so the label stands for the window."""
 
