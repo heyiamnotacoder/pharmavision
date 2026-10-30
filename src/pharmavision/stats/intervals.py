@@ -4,7 +4,7 @@ from collections.abc import Callable, Sequence
 
 import numpy as np
 from numpy.typing import NDArray
-from scipy import special, stats
+from scipy import optimize, stats
 
 from ..artifacts import StatsSettings
 
@@ -18,18 +18,29 @@ def z_critical(level: float) -> float:
     return float(stats.norm.ppf((1 + level) / 2))
 
 
-def eta_squared_ci(f: float, df1: float, df2: float, n: int, level: float) -> tuple[float, float]:
+def eta_squared_ci(f: float, df1: float, df2: float, level: float) -> tuple[float, float]:
     """The interval of eta² from an F statistic, through its noncentrality: the noncentralities
-    at which `f` is the upper and lower (1 - level) / 2 quantile, each as nc / (nc + n). An end
-    whose noncentrality would be negative is 0."""
+    at which `f` is the upper and lower (1 - level) / 2 quantile, each put on the estimate's
+    scale as nc / (nc + df2), as R's `effectsize` does (eta² = F df1 / (F df1 + df2), with
+    F df1 for nc). On the population scale, nc / (nc + n), a large effect's estimate can fall
+    outside its own interval. An end whose noncentrality would be negative is 0."""
     tail = (1 - level) / 2
     central = float(stats.f.cdf(f, df1, df2))
 
+    def excess(nc: float, p: float) -> float:
+        return float(stats.ncf.cdf(f, df1, df2, nc)) - p
+
     def noncentrality(p: float) -> float:
-        return float(special.ncfdtrinc(df1, df2, p, f)) if central > p else 0.0
+        # Root-found on the cdf: scipy.special.ncfdtrinc misses it by about 1e-6.
+        if central <= p:
+            return 0.0
+        high = max(1.0, f * df1)
+        while excess(high, p) > 0:
+            high *= 2
+        return float(optimize.brentq(excess, 0.0, high, args=(p,)))
 
     low, high = noncentrality(1 - tail), noncentrality(tail)
-    return low / (low + n), high / (high + n)
+    return low / (low + df2), high / (high + df2)
 
 
 def bootstrap_ci(

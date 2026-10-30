@@ -20,7 +20,7 @@ def anova(
     f = float(result.statistic)
     n = sum(len(s) for s in samples)
     df1, df2 = len(samples) - 1, n - len(samples)
-    low, high = eta_squared_ci(f, df1, df2, n, settings.ci_level)
+    low, high = eta_squared_ci(f, df1, df2, settings.ci_level)
     return Comparison(
         test="anova",
         statistic=f,
@@ -72,7 +72,8 @@ def _eta_squared(*samples: NDArray[np.float64], axis: int) -> NDArray[np.float64
     for s in samples:
         between += s.shape[axis] * (s.mean(axis=axis) - grand) ** 2
     total = ((pooled - np.expand_dims(grand, axis)) ** 2).sum(axis=axis)
-    return between / total
+    # A resample of all-equal values has no eta² (0 / 0); it separates no group, so 0.
+    return np.divide(between, total, out=np.zeros_like(between), where=total > 0)
 
 
 def kruskal_wallis(

@@ -1,6 +1,7 @@
 """Two groups: the later group `b` against the reference `a`."""
 
 import math
+import statistics
 from collections.abc import Sequence
 
 from scipy import stats
@@ -16,7 +17,7 @@ def t_test(
     interval from the same t distribution."""
     result = stats.ttest_ind(b, a, equal_var=equal_var)
     ci = result.confidence_interval(settings.ci_level)
-    estimate = sum(b) / len(b) - sum(a) / len(a)
+    estimate = statistics.fmean(b) - statistics.fmean(a)
     return Comparison(
         test="student_t" if equal_var else "welch_t",
         statistic=float(result.statistic),

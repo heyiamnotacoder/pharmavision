@@ -19,7 +19,7 @@ from ..artifacts import (
 from .rule import compare
 
 
-def study_stats(table: TrialTable, design: StudyDesign, settings: StatsSettings) -> StudyStats:
+def table_stats(table: TrialTable, design: StudyDesign, settings: StatsSettings) -> StudyStats:
     """Every metric compared between the design's groups, in the design's group order."""
     return StudyStats(
         settings=settings,
@@ -46,8 +46,7 @@ def _metric_stats(
 
 
 def _analysed(metric: MetricName, rows: Sequence[TrialRow]) -> list[float]:
-    """The values the test uses: trials not excluded, with the metric known."""
-    return [v for r in rows if not r.excluded and (v := r.values[metric]) is not None]
+    return [v for r in rows if (v := r.analysed_value(metric)) is not None]
 
 
 def _summary(

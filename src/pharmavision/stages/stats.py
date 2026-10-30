@@ -14,7 +14,7 @@ from ..artifacts import (
     TrialRow,
     TrialTable,
 )
-from ..stats.study import study_stats
+from ..stats.study import table_stats
 
 
 def run(study: StudyFolder, runs_dir: Path, settings: StatsSettings) -> StudyStats:
@@ -22,7 +22,7 @@ def run(study: StudyFolder, runs_dir: Path, settings: StatsSettings) -> StudySta
     runs = [RunFolder(runs_dir / t.run_id) for t in design.trials]
     table = TrialTable(trials=[_row(run, t) for run, t in zip(runs, design.trials, strict=True)])
     _check_same_settings(runs, design.trials)
-    result = study_stats(table, design, settings)
+    result = table_stats(table, design, settings)
     study.write_trials(table)
     study.write_stats(result)
     return result

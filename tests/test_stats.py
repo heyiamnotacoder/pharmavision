@@ -13,7 +13,7 @@ from numpy.typing import NDArray
 from pydantic import ValidationError
 from scipy import stats as st
 from statsmodels.stats.multicomp import pairwise_tukeyhsd
-from statsmodels.stats.oneway import anova_oneway, confint_effectsize_oneway
+from statsmodels.stats.oneway import anova_oneway
 
 from pharmavision.artifacts import MeasureSettings, MetricStats, StudyStats
 from pharmavision.pipeline import StudyNotReadyError, study_stats
@@ -155,9 +155,11 @@ def test_three_normal_groups_with_equal_variances_get_anova_and_tukeys_hsd(
     effect = metric.comparison.effect
     assert effect.name == "eta_squared"
     assert effect.estimate == pytest.approx(0.5843857952)  # pingouin.anova np2
-    ci = confint_effectsize_oneway(reference.statistic, (2, 15), alpha=0.05, nobs=18)
-    low, high = np.asarray(ci.eta2)
-    assert (effect.ci_low, effect.ci_high) == pytest.approx((low, high))
+    # The interval is of the noncentrality at which F is the 97.5th and 2.5th percentile, put
+    # on the estimate's scale as nc / (nc + df2), as R's effectsize does.
+    for eta_squared, q in ((effect.ci_low, 0.975), (effect.ci_high, 0.025)):
+        noncentrality = 15 * eta_squared / (1 - eta_squared)
+        assert st.ncf.cdf(reference.statistic, 2, 15, noncentrality) == pytest.approx(q, abs=1e-9)
     # Every pair in design order, later group minus earlier, against statsmodels' Tukey HSD.
     assert pairs(metric) == [("vehicle", "low"), ("vehicle", "high"), ("low", "high")]
     tukey = tukey_reference(groups)
@@ -362,3 +364,39 @@ def test_refuses_a_design_whose_trial_names_no_group_of_it(tmp_path: Path, runs_
 
     with pytest.raises(ValidationError, match="trials in unknown groups: vehicel"):
         study_stats(study, runs_dir)
+
+
+@pytest.mark.parametrize(
+    ("groups", "test"),
+    [
+        # Counts, as centre entries are: some resamples hold one value only, with no eta².
+        ([[5.0, 6, 4, 5], [5, 10, 9, 5], [5, 6, 3, 5]], "welch_anova"),
+        # An effect so large that an interval on another scale than the estimate's misses it.
+        ([[1.0, 1.1, 0.9], [5, 5.1, 4.9], [9, 9.1, 8.9]], "anova"),
+    ],
+)
+def test_the_effect_size_interval_is_finite_and_holds_its_estimate(
+    tmp_path: Path, runs_dir: Path, groups: list[list[float]], test: str
+) -> None:
+    study = write_study(
+        tmp_path, runs_dir, dict(zip(["vehicle", "low", "high"], groups, strict=True))
+    )
+
+    stats = study_stats(study, runs_dir)
+
+    metric = distance(stats)
+    assert metric.comparison is not None
+    assert metric.comparison.test == test
+    effect = metric.comparison.effect
+    assert effect.ci_low <= effect.estimate <= effect.ci_high
+    assert study.stats() == stats
+
+
+def test_the_same_study_gives_the_same_stats(tmp_path: Path, runs_dir: Path) -> None:
+    study = write_study(tmp_path, runs_dir, {"vehicle": TIGHT, "low": WIDE, "high": NARROW})
+
+    study_stats(study, runs_dir)
+    first = (study.path / "stats.json").read_bytes()
+    study_stats(study, runs_dir)
+
+    assert (study.path / "stats.json").read_bytes() == first

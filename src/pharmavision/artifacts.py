@@ -497,7 +497,7 @@ class StudyDesign(Artifact):
     trials: list[StudyTrial]
 
     @model_validator(mode="after")
-    def _trials_name_known_groups_once(self) -> "StudyDesign":
+    def _names_unique_and_groups_known(self) -> "StudyDesign":
         names = [g.name for g in self.groups]
         for kind, values in (
             ("group name", names),
@@ -527,6 +527,10 @@ class TrialRow(Artifact):
     def excluded(self) -> bool:
         return any(e.scope == "trial" for e in self.exclusions)
 
+    def analysed_value(self, metric: MetricName) -> float | None:
+        """The value the stats use: None for an excluded trial, or a metric not computed."""
+        return None if self.excluded else self.values[metric]
+
 
 class TrialTable(Artifact):
     """`trials.json`: the per-trial metrics table, one row per trial of the design, in its
@@ -545,10 +549,12 @@ class StatsSettings(Artifact):
     variance_alpha: float = Field(default=0.05, gt=0, lt=1)
     """Variances are taken as equal when Levene's p (median-centred) is above this."""
     ci_level: float = Field(default=0.95, gt=0, lt=1)
+    """The confidence level of every effect size's interval and the post-hoc intervals."""
     min_group_n: int = Field(default=3, ge=3)
     """With fewer trials left in any group the rule abstains: Shapiro-Wilk needs 3."""
     bootstrap_resamples: int = Field(default=9999, ge=100)
-    """For the one effect size with no closed-form interval, Kruskal-Wallis's epsilon²."""
+    """For the effect sizes whose interval is bootstrapped: eta² after Welch's ANOVA and
+    epsilon² after Kruskal-Wallis."""
     bootstrap_seed: int = 0
     """Fixed, so the same table gives the same interval."""
 
@@ -651,10 +657,21 @@ class StudyStats(Artifact):
 
 
 @dataclass(frozen=True)
-class RunFolder:
-    """One run's folder on disk, with typed reads and writes for each artifact."""
+class _ArtifactFolder:
+    """A folder of JSON artifacts; every read validates against the artifact's type."""
 
     path: Path
+
+    def _read[A: Artifact](self, name: str, kind: type[A]) -> A:
+        return kind.model_validate_json((self.path / name).read_text())
+
+    def _write(self, name: str, artifact: Artifact) -> None:
+        (self.path / name).write_text(artifact.model_dump_json(indent=2) + "\n")
+
+
+@dataclass(frozen=True)
+class RunFolder(_ArtifactFolder):
+    """One run's folder on disk, with typed reads and writes for each artifact."""
 
     @property
     def run_id(self) -> str:
@@ -712,23 +729,15 @@ class RunFolder:
     def write_qc(self, qc: Qc) -> None:
         self._write("qc.json", qc)
 
-    def _read[A: Artifact](self, name: str, kind: type[A]) -> A:
-        return kind.model_validate_json((self.path / name).read_text())
-
-    def _write(self, name: str, artifact: Artifact) -> None:
-        (self.path / name).write_text(artifact.model_dump_json(indent=2) + "\n")
-
 
 class StudyNotReadyError(RuntimeError):
     pass
 
 
 @dataclass(frozen=True)
-class StudyFolder:
+class StudyFolder(_ArtifactFolder):
     """One study's folder: its design (`study.yaml`, written by the scientist), the per-trial
     metrics table and the stats."""
-
-    path: Path
 
     def design(self) -> StudyDesign:
         return StudyDesign.model_validate(yaml.safe_load((self.path / "study.yaml").read_text()))
@@ -744,9 +753,3 @@ class StudyFolder:
 
     def write_stats(self, stats: StudyStats) -> None:
         self._write("stats.json", stats)
-
-    def _read[A: Artifact](self, name: str, kind: type[A]) -> A:
-        return kind.model_validate_json((self.path / name).read_text())
-
-    def _write(self, name: str, artifact: Artifact) -> None:
-        (self.path / name).write_text(artifact.model_dump_json(indent=2) + "\n")

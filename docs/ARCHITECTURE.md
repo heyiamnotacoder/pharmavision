@@ -270,13 +270,13 @@ purity.
   |---|---|---|
   | Student's / Welch's t | difference in means (later group minus the reference), metric units | from the same t distribution |
   | Mann–Whitney U | rank-biserial r | Fisher's z; zero width when the groups do not overlap |
-  | ANOVA | η² (SSB / SST) | noncentral F |
+  | ANOVA | η² (SSB / SST) | noncentral F, ends as nc / (nc + df₂) so the estimate stays inside |
   | Welch's ANOVA | η² (SSB / SST) | percentile bootstrap within groups, fixed seed |
   | Kruskal–Wallis | ε² = H / (n − 1) | percentile bootstrap within groups, fixed seed |
 
 - Post-hoc pairs in design order: the difference, t (or z for Dunn), adjusted p, and an interval
   for Tukey and Games-Howell.
-- Libraries: `scipy` only, typed by `scipy-stubs` so `stats/` passes pyright strict. The tests
+- Libraries: `scipy` only, typed by `scipy-stubs` (dev) so `stats/` passes pyright strict. The tests
   check against `statsmodels` and literals from `pingouin` 0.7.0 and `scikit-posthocs` 0.17.1
   (not dependencies) for the tests scipy lacks.
 

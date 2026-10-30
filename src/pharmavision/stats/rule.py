@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 from scipy import stats
 
-from ..artifacts import Comparison, NormalityCheck, StatsSettings, VarianceCheck
+from ..artifacts import Comparison, NormalityCheck, StatsSettings, TestName, VarianceCheck
 from .many_groups import anova, kruskal_wallis, welch_anova
 from .two_groups import mann_whitney, t_test
 
@@ -36,7 +36,8 @@ def compare(
     if len(pooled) == 1:
         reason = f"no test: every trial analysed has the same value, {pooled.pop():g}"
         return RuleOutcome([], None, reason, None)
-    normality = [_shapiro(name, sample) for name, sample in groups if len(set(sample)) > 1]
+    flat = [name for name, sample in groups if len(set(sample)) == 1]
+    normality = [_shapiro(name, sample) for name, sample in groups if name not in flat]
     levene = stats.levene(*samples, center="median")
     # Every group without spread leaves Levene 0 / 0: no check, and the rule has gone
     # non-parametric already.
@@ -46,35 +47,50 @@ def compare(
         else VarianceCheck(statistic=float(levene.statistic), p=float(levene.pvalue))
     )
     alpha = settings.normality_alpha
-    not_normal = [
-        f"{name} has no spread, so Shapiro-Wilk cannot check it"
-        for name, sample in groups
-        if len(set(sample)) == 1
-    ] + [f"Shapiro-Wilk p = {c.p:.3g} <= {alpha:g} in {c.group}" for c in normality if c.p <= alpha]
+    not_normal = [f"{name} has no spread, so Shapiro-Wilk cannot check it" for name in flat] + [
+        f"Shapiro-Wilk p = {c.p:.3g} <= {alpha:g} in {c.group}" for c in normality if c.p <= alpha
+    ]
+    two = len(samples) == 2
     if not_normal or variance is None:  # no variance check means no spread anywhere
-        if len(samples) == 2:
-            test = "Mann-Whitney U test"
-            comparison = mann_whitney(samples[0], samples[1], settings)
-        else:
-            test = "Kruskal-Wallis test with Dunn's test (Holm)"
-            comparison = kruskal_wallis(names, samples, settings)
-        reason = f"{'; '.join(not_normal)}: {test}"
-        return RuleOutcome(normality, variance, reason, comparison)
-    equal = variance.p > settings.variance_alpha
-    if len(samples) == 2:
-        test = "Student's t-test" if equal else "Welch's t-test"
-        comparison = t_test(samples[0], samples[1], equal, settings)
-    elif equal:
-        test = "one-way ANOVA with Tukey's HSD"
-        comparison = anova(names, samples, settings)
+        test: TestName = "mann_whitney_u" if two else "kruskal_wallis"
+        reason = f"{'; '.join(not_normal)}: {_LABELS[test]}"
     else:
-        test = "Welch's ANOVA with Games-Howell"
-        comparison = welch_anova(names, samples, settings)
-    reason = (
-        f"Shapiro-Wilk p > {settings.normality_alpha:g} in every group and Levene "
-        f"p = {variance.p:.3g} {'>' if equal else '<='} {settings.variance_alpha:g}: {test}"
-    )
-    return RuleOutcome(normality, variance, reason, comparison)
+        equal = variance.p > settings.variance_alpha
+        test = ("student_t" if two else "anova") if equal else ("welch_t" if two else "welch_anova")
+        reason = (
+            f"Shapiro-Wilk p > {alpha:g} in every group and Levene p = {variance.p:.3g} "
+            f"{'>' if equal else '<='} {settings.variance_alpha:g}: {_LABELS[test]}"
+        )
+    return RuleOutcome(normality, variance, reason, _run(test, names, samples, settings))
+
+
+_LABELS: dict[TestName, str] = {
+    "student_t": "Student's t-test",
+    "welch_t": "Welch's t-test",
+    "mann_whitney_u": "Mann-Whitney U test",
+    "anova": "one-way ANOVA with Tukey's HSD",
+    "welch_anova": "Welch's ANOVA with Games-Howell",
+    "kruskal_wallis": "Kruskal-Wallis test with Dunn's test (Holm)",
+}
+
+
+def _run(
+    test: TestName,
+    names: Sequence[str],
+    samples: Sequence[Sequence[float]],
+    settings: StatsSettings,
+) -> Comparison:
+    match test:
+        case "student_t" | "welch_t":
+            return t_test(samples[0], samples[1], test == "student_t", settings)
+        case "mann_whitney_u":
+            return mann_whitney(samples[0], samples[1], settings)
+        case "anova":
+            return anova(names, samples, settings)
+        case "welch_anova":
+            return welch_anova(names, samples, settings)
+        case "kruskal_wallis":
+            return kruskal_wallis(names, samples, settings)
 
 
 def _shapiro(name: str, sample: Sequence[float]) -> NormalityCheck:

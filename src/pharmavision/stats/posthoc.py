@@ -79,12 +79,12 @@ def dunn(names: Sequence[str], samples: Sequence[Sequence[float]]) -> list[Pairw
     mean_ranks = [float(ranks[lo:hi].mean()) for lo, hi in itertools.pairwise(bounds)]
     ties = sum(t**3 - t for t in Counter(pooled).values())
     variance = n * (n + 1) / 12 - ties / (12 * (n - 1))
-    found: list[tuple[int, int, float, float]] = []
+    raw: list[tuple[int, int, float, float]] = []
     for i, j in itertools.combinations(range(len(samples)), 2):
         difference = mean_ranks[j] - mean_ranks[i]
         z = difference / math.sqrt(variance * (1 / len(samples[i]) + 1 / len(samples[j])))
-        found.append((i, j, difference, z))
-    adjusted = _holm([2 * float(stats.norm.sf(abs(z))) for *_, z in found])
+        raw.append((i, j, difference, z))
+    adjusted = _holm([2 * float(stats.norm.sf(abs(z))) for *_, z in raw])
     return [
         PairwiseComparison(
             group_a=names[i],
@@ -95,7 +95,7 @@ def dunn(names: Sequence[str], samples: Sequence[Sequence[float]]) -> list[Pairw
             ci_low=None,
             ci_high=None,
         )
-        for (i, j, difference, z), p in zip(found, adjusted, strict=True)
+        for (i, j, difference, z), p in zip(raw, adjusted, strict=True)
     ]
 
 
