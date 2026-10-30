@@ -34,8 +34,15 @@ Model responses live outside any one run, in `runs/model_cache/<model>/<prompt v
 hash>.jsonl.gz` (the raw event stream, the same format as the test fixtures), so re-running a
 video in a new run folder costs nothing.
 
-A study is a set of runs plus `study.yaml` (groups, treatment, dose, blinding codes, arena template).
-Stats and report run at study level.
+A study is a set of runs plus `study.yaml` (groups, treatment, dose, blinding codes). Stats and
+report run at study level, in a study folder:
+
+```
+studies/<study>/
+  study.yaml         # the design, written by the scientist: groups in order (the first is the reference), and per trial its run id, blinding code and group
+  trials.json        # per-trial metrics table: values, group, blinding code and every QC exclusion; excluded trials stay in it
+  stats.json         # per metric: n per group after exclusions, the checks, the test and why, statistic, df, p, effect size + CI, post-hoc pairs
+```
 
 All artifacts are Pydantic models serialised to JSON or Parquet. The type is the stage contract.
 
@@ -243,12 +250,35 @@ purity.
   goal FR-S6.
 
 ### 7. Stats (measures)
-- Input: per-animal metrics × `study.yaml` groups.
-- **The test is chosen by a deterministic rule, not by the model:**
-  normality (Shapiro–Wilk) and equal variance (Levene) → t-test / Welch / Mann–Whitney for 2 groups;
-  one-way ANOVA + Tukey, Welch ANOVA + Games-Howell, or Kruskal–Wallis + Dunn for 3 or more.
-- Output: test used and why, statistic, p, effect size with 95% CI, n per group after exclusions.
-- Libraries: `scipy` and `statsmodels`, with `pingouin` if it saves time. Pin versions.
+- Input: per-trial metrics × `study.yaml` groups. The stage refuses a study while any run lacks
+  `qc.json`, or when its runs were measured or QC'd with different settings.
+- Trials with a trial exclusion are left out, and so is a trial whose metric is unknown (None);
+  each group reports `n` analysed, `n_excluded` and `n_missing` per metric. Window exclusions are
+  listed on the trial's row but do not yet change its metrics (they were computed before QC).
+- **The test is chosen by a deterministic rule, not by the model** (`stats/rule.py`, thresholds
+  in the versioned `StatsSettings`):
+  1. Any group with fewer than 3 trials left, or every value the same: no test, and the reason
+     says why (abstain).
+  2. Shapiro–Wilk on each group (a group with no spread counts as not normal); Levene across
+     them, median-centred.
+  3. Any group not normal → Mann–Whitney U (2 groups) or Kruskal–Wallis + Dunn, Holm-adjusted
+     (3 or more). All normal, Levene p > 0.05 → Student's t or one-way ANOVA + Tukey's HSD.
+     Otherwise Welch's t or Welch's ANOVA + Games-Howell.
+- Effect sizes, each with a 95% CI:
+
+  | Test | Effect size | Interval |
+  |---|---|---|
+  | Student's / Welch's t | difference in means (later group minus the reference), metric units | from the same t distribution |
+  | Mann–Whitney U | rank-biserial r | Fisher's z; zero width when the groups do not overlap |
+  | ANOVA | η² (SSB / SST) | noncentral F, ends as nc / (nc + df₂) so the estimate stays inside |
+  | Welch's ANOVA | η² (SSB / SST) | percentile bootstrap within groups, fixed seed |
+  | Kruskal–Wallis | ε² = H / (n − 1) | percentile bootstrap within groups, fixed seed |
+
+- Post-hoc pairs in design order: the difference, t (or z for Dunn), adjusted p, and an interval
+  for Tukey and Games-Howell.
+- Libraries: `scipy` only, typed by `scipy-stubs` (dev) so `stats/` passes pyright strict. The tests
+  check against `statsmodels` and literals from `pingouin` 0.7.0 and `scikit-posthocs` 0.17.1
+  (not dependencies) for the tests scipy lacks.
 
 ### 8. Report (judges, then the number audit)
 - A Muse Spark agent with read-only tools: `get_protocol`, `get_metrics_table`, `get_stats`,

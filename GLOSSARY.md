@@ -16,6 +16,14 @@ _Avoid_: Run, video, subject, session
 A set of trials together with their design: groups, treatment, dose and blinding.
 _Avoid_: Experiment, batch, project
 
+**Reference group**:
+The first group in a study's design, usually the vehicle. Two-group differences are the other group minus it, and post-hoc pairs run in the design's order from it.
+_Avoid_: Control (when it is not a control), baseline
+
+**Abstain**:
+To give no number where the data cannot support one, and say why: the stats abstain on a metric when a group has too few trials left or no trial differs; the report writes `[TO FILL]` for a fact the system cannot know.
+_Avoid_: Fail, skip, zero
+
 **Gap**:
 A stretch of consecutive frames where the tracker found no animal. Short gaps are bridged by linear interpolation; longer ones stay missing in every metric and go to QC.
 _Avoid_: Dropout, missing frame (for the whole run)

@@ -1,5 +1,6 @@
 """The pipeline entry: the one test seam. A run goes ingest → arena, stops at the arena gate,
-and continues with track → measure → behaviours → QC once a human confirms the zones."""
+and continues with track → measure → behaviours → QC once a human confirms the zones. At study
+level, the stats run over a study's design and its finished runs."""
 
 import shutil
 import uuid
@@ -19,10 +20,14 @@ from .artifacts import (
     Metrics,
     QcSettings,
     RunFolder,
+    StatsSettings,
+    StudyFolder,
+    StudyNotReadyError,
+    StudyStats,
 )
 from .judge import Judge
 from .segmenter import Segmenter
-from .stages import arena, behaviours, ingest, measure, qc, track
+from .stages import arena, behaviours, ingest, measure, qc, stats, track
 from .stages.arena import ArenaNotFoundError
 from .stages.ingest import VideoTooShortError
 from .templates import TestTemplate
@@ -32,11 +37,14 @@ __all__ = [
     "ArenaNotFoundError",
     "RunFolder",
     "Stage",
+    "StudyFolder",
+    "StudyNotReadyError",
     "VideoTooShortError",
     "confirm_arena",
     "finish_run",
     "run_stage",
     "start_run",
+    "study_stats",
 ]
 
 
@@ -123,6 +131,15 @@ def run_stage(run: RunFolder, stage: Stage, segmenter: Segmenter, judge: Judge) 
             if run.qc().reviews:
                 _record_model(run, "qc_hands", segmenter.model_id)
                 _record_model(run, "qc", judge.model_id)
+
+
+def study_stats(
+    study: StudyFolder, runs_dir: Path, settings: StatsSettings | None = None
+) -> StudyStats:
+    """The study-level stats: every trial in `study.yaml` read from its run in `runs_dir`, the
+    per-trial metrics table and the stats written to the study folder. Raises
+    StudyNotReadyError, writing nothing, while any of its runs has not finished QC."""
+    return stats.run(study, runs_dir, settings or StatsSettings())
 
 
 def _record_model(run: RunFolder, stage: str, model_id: str) -> None:

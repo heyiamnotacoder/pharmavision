@@ -1,0 +1,30 @@
+# The stats layer is pure, like measure/: no I/O and no model calls (CLAUDE.md, "sees → measures → judges").
+# Same rules as the project, plus these bans, so `scripts/check.sh` enforces it.
+extend = "../../../pyproject.toml"
+
+[lint]
+# TID251 enforces the bans below. It can't ban builtins, so T20 catches print() and PTH123
+# catches any open() (it suggests Path.open, which the pathlib ban then rules out).
+extend-select = ["TID251", "T20", "PTH123"]
+
+[lint.flake8-tidy-imports.banned-api]
+"io".msg = "stats/ does no I/O."
+"os".msg = "stats/ does no I/O."
+"pathlib".msg = "stats/ does no I/O: take values, not paths."
+"shutil".msg = "stats/ does no I/O."
+"subprocess".msg = "stats/ does no I/O."
+"socket".msg = "stats/ makes no network calls."
+"urllib".msg = "stats/ makes no network calls."
+"httpx".msg = "stats/ makes no network calls."
+"openai".msg = "stats/ makes no model calls: that is the sees and judges layers."
+"numpy.load".msg = "stats/ does no I/O."
+"numpy.save".msg = "stats/ does no I/O."
+"pyarrow".msg = "stats/ does no I/O."
+"yaml".msg = "stats/ does no I/O: the stage reads study.yaml."
+"pharmavision.artifacts.RunFolder".msg = "stats/ takes artifacts as values; the stage reads the run folders."
+"pharmavision.artifacts.StudyFolder".msg = "stats/ takes artifacts as values; the stage reads and writes the study folder."
+"pharmavision.segmenter".msg = "stats/ makes no model calls."
+"pharmavision.judge".msg = "stats/ makes no model calls."
+"pharmavision.stages".msg = "stats/ is called by the stages, never the reverse."
+"pharmavision.measure".msg = "stats/ compares the metrics; computing them is measure/'s job."
+"pharmavision.pipeline".msg = "stats/ is called by the stages, never the reverse."
