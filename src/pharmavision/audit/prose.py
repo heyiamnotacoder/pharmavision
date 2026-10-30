@@ -5,11 +5,14 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+_FLOAT_SLACK = 1e-9
+"""Relative slack on the rounding bound, so 0.945 written as 0.95 is not lost to binary floats."""
+
 _SUPERSCRIPTS = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻", "0123456789+-")
 
 _NUMBER = re.compile(
     r"""
-    (?<![\w.])(?<![^\W\d]-)             # not part of an identifier (B07, OFT_16, OFT-16)
+    (?<![\w.^])(?<![^\W\d]-)            # not part of an identifier (B07, OFT_16, OFT-16, cm^2)
     (?P<mantissa>[0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]+)?|[0-9]+(?:\.[0-9]+)?|\.[0-9]+)
     (?:
         \s*[x\N{MULTIPLICATION SIGN}]\s*10                  # 1.6 x 10^-3, also as a times sign
@@ -21,9 +24,12 @@ _NUMBER = re.compile(
     re.VERBOSE,
 )
 
-_LINE_BLOCK = re.compile(r"[ \t]*(?:[#|*-]|[0-9]+\.\s)")
+_LINE_BLOCK = re.compile(r"[ \t]*(?:[#|]|[-*+][ \t]|[0-9]+\.[ \t])")
 """A Markdown heading, table row or list item: one line, a block of its own."""
-_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+_SENTENCE_END = re.compile(
+    r"(?<=[.!?])(?<!\bal\.)(?<!\be\.g\.)(?<!\bi\.e\.)(?<!\bvs\.)(?<!\bFig\.)(?<!\bcf\.)\s+"
+)
+"""A full stop and a space, except after "et al.", "e.g.", "i.e.", "vs.", "Fig." or "cf."."""
 
 
 @dataclass(frozen=True)
@@ -37,6 +43,13 @@ class WrittenNumber:
     one when it was rounded."""
     percent: bool
     span: tuple[int, int]
+
+    def rounding_error(self, known: float) -> float | None:
+        """How far `known` is from the written number, when it rounds to it; None otherwise.
+        Magnitudes are compared, and a percent against `known` times 100."""
+        distance = abs(abs(known) * (100 if self.percent else 1) - self.value)
+        bound = self.half_unit + _FLOAT_SLACK * max(self.value, self.half_unit)
+        return distance if distance <= bound else None
 
 
 def written_numbers(prose: str, allowed_phrases: Sequence[str]) -> list[WrittenNumber]:

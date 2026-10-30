@@ -661,7 +661,7 @@ class AuditSettings(Artifact):
 
     version: int = 1
     """Bump when a default or the matching rule changes."""
-    allowed_phrases: tuple[str, ...] = ("ARRIVE 2.0", "Essential 10")
+    allowed_phrases: tuple[str, ...] = ("ARRIVE 2.0", "Essential 10", "SAM 3.1")
     """Fixed names that hold a number but state no result; their numbers are not audited.
     Matched whole and ignoring case. No "95% CI" here: its 95 must match the stats'
     `ci_level`, so a study run at another level fails the audit instead of passing."""

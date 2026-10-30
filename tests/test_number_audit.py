@@ -49,6 +49,7 @@ def test_honest_prose_about_a_study_passes(tmp_path: Path, runs_dir: Path) -> No
     by_text = {n.text: n.source for n in result.numbers}
     assert by_text["4.27"] == "stats.metrics[0].comparison.statistic"
     assert by_text["95%"] == "stats.settings.ci_level"
+    assert by_text["6"] == "stats.metrics[0].groups[0].n"  # a field, not a list's length
 
 
 def test_an_invented_number_fails_and_is_named_with_its_sentence() -> None:
@@ -97,7 +98,7 @@ def test_signs_are_not_audited_so_a_difference_reads_either_way() -> None:
 
 
 def test_identifiers_and_allowed_phrases_are_not_audited() -> None:
-    result = audit("Trials B07 and OFT_16 (run OFT-16) follow ARRIVE 2.0, Essential 10.")
+    result = audit("Trials B07, OFT_16 and OFT-16 (cm^2) were scored by SAM 3.1 per ARRIVE 2.0.")
 
     assert result.numbers == []
 
@@ -142,3 +143,11 @@ def test_each_markdown_table_row_and_heading_is_its_own_sentence() -> None:
     assert [n.sentence for n in result.unmatched] == [
         "## Results 2", "| vehicle | 38 |", "- 3 trials were excluded",
     ]  # fmt: skip
+
+
+def test_a_sentence_runs_on_past_abbreviations_and_wrapped_lines() -> None:
+    prose = "As in Sturman et al. the mice ran 99 cm, a difference of\n-1.95 cm and\n*p* = 0.04."
+
+    result = audit(prose)
+
+    assert {n.sentence for n in result.unmatched} == {prose}
