@@ -7,10 +7,12 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
+import numpy as np
 import pytest
+from numpy.typing import NDArray
 from shapely.geometry import Polygon
 
-from pharmavision.artifacts import Gap, MeasureSettings, RearCandidate
+from pharmavision.artifacts import ArenaSettings, Gap, MeasureSettings, RearCandidate
 from pharmavision.pipeline import (
     ArenaNotConfirmedError,
     ArenaNotFoundError,
@@ -21,6 +23,7 @@ from pharmavision.pipeline import (
     run_stage,
     start_run,
 )
+from pharmavision.segmenter import Mask
 from pharmavision.segmenter.synthetic import SyntheticSegmenter
 
 from .scenes import FLOOR, N_FRAMES, PX_PER_CM, TEMPLATE, circle_walk, finished_run
@@ -62,6 +65,35 @@ def test_a_floor_never_found_leaves_no_run_folder(tmp_path: Path, runs_dir: Path
         start_run(video, TEMPLATE, SyntheticSegmenter(floor=[]), runs_dir)
 
     assert list(runs_dir.iterdir()) == []
+
+
+class ImageSpy(SyntheticSegmenter):
+    def __init__(self) -> None:
+        super().__init__(floor=FLOOR)
+        self.images: list[NDArray[np.uint8]] = []
+
+    def segment_image(self, image: NDArray[np.uint8], prompt: str) -> list[Mask]:
+        self.images.append(image)
+        return super().segment_image(image, prompt)
+
+
+def test_the_floor_prompt_sees_the_background_equalised(tmp_path: Path, runs_dir: Path) -> None:
+    # SAM 3.1 drops a floor it scores under about 0.5. On two Sturman cameras the plain
+    # background frame scored just under, and the equalised one did not (Oct 30).
+    video = make_video(tmp_path / "dim.mp4", seconds=4, floor_box=(100, 100, 160, 160))
+    plain, equalised = ImageSpy(), ImageSpy()
+
+    off = ArenaSettings(contrast_clip_limit=None)
+    start_run(video, TEMPLATE, plain, runs_dir, arena_settings=off)
+    run = start_run(video, TEMPLATE, equalised, runs_dir)
+
+    def edge_step(image: NDArray[np.uint8]) -> float:
+        # Across the floor's left edge (x = 100) on its middle row, inside one CLAHE tile.
+        grey = image.mean(axis=2)
+        return float(grey[180, 102:108].mean() - grey[180, 92:98].mean())
+
+    assert edge_step(equalised.images[0]) > edge_step(plain.images[0]) > 0
+    assert run.manifest().arena.contrast_clip_limit == ArenaSettings().contrast_clip_limit
 
 
 def test_ingest_normalises_the_video_and_records_the_source(tmp_path: Path, runs_dir: Path) -> None:

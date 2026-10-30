@@ -53,6 +53,12 @@ class ArenaSettings(Artifact):
     """Frames sampled for the per-pixel median background."""
     outline_tolerance: float = 0.01
     """Floor outline simplification, as a fraction of its perimeter."""
+    contrast_clip_limit: float | None = Field(default=2.0, gt=0)
+    """CLAHE clip limit for equalising the background frame the floor prompt sees; None sends
+    it as is. SAM 3.1 drops a floor it scores under about 0.5, and the plain frame from two of
+    the four Sturman cameras scored just under (Oct 30)."""
+    contrast_tiles: int = Field(default=8, ge=1)
+    """CLAHE equalises the frame as a grid of this many by this many tiles."""
 
 
 class MeasureSettings(Artifact):
