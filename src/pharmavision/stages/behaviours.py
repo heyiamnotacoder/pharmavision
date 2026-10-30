@@ -6,14 +6,12 @@ the arena. The video is read once for all clips; the model never sees the full v
 
 import subprocess
 import tempfile
-import warnings
 from collections.abc import Sequence
 from pathlib import Path
 
 import cv2
 import numpy as np
 from numpy.typing import NDArray
-from pycocotools import mask as coco_mask
 
 from ..artifacts import (
     BehaviourEvent,
@@ -24,7 +22,9 @@ from ..artifacts import (
     RunFolder,
     TrackFrame,
 )
-from ..judge import Judge
+from ..judge import Clip, Judge
+from ..measure.shape import decode_mask
+from ..model_cache import input_hash
 
 OUTLINE_BGR = (0, 255, 0)
 
@@ -60,8 +60,7 @@ def run(run: RunFolder, judge: Judge) -> None:
                     )
                     buffers[k].append(crop)
                     if index == span.stop - 1:
-                        _encode(buffers.pop(k), video.fps, clip_path)
-                        judgement = judge.classify_clip(clip_path)
+                        judgement = judge.classify_clip(_clip(buffers.pop(k), video.fps, clip_path))
                         events[k] = BehaviourEvent(
                             first_frame=candidates[k].first_frame,
                             last_frame=candidates[k].last_frame,
@@ -131,18 +130,14 @@ def _mask(frame: TrackFrame, video: NormalisedVideo) -> NDArray[np.uint8] | None
     """The frame's tracked mask over the whole frame, or None in a gap."""
     if frame.mask_rle is None:
         return None
-    with warnings.catch_warnings():
-        # pycocotools' Cython decoder predates NumPy 2's `copy` keyword; the result is right.
-        warnings.filterwarnings("ignore", "__array__ implementation", DeprecationWarning)
-        return coco_mask.decode(
-            {"size": [video.height, video.width], "counts": frame.mask_rle.encode("ascii")}
-        )
+    return decode_mask(frame.mask_rle, video.height, video.width)
 
 
-def _encode(frames: Sequence[NDArray[np.uint8]], fps: float, dest: Path) -> Path:
-    """The frames as an H.264 MP4, bit-exact so the same frames always give the same bytes
-    (the clip's hash is its cache key)."""
+def _clip(frames: Sequence[NDArray[np.uint8]], fps: float, dest: Path) -> Clip:
+    """The frames as an H.264 MP4, keyed by the hash of the frames themselves and the frame
+    rate, which every machine computes alike from the same run folder."""
     side = frames[0].shape[0]
+    frames_sha256 = input_hash(f"{side}x{side} at {fps} fps", *(f.tobytes() for f in frames))
     subprocess.run(
         [
             "ffmpeg", "-v", "error", "-y",
@@ -155,4 +150,4 @@ def _encode(frames: Sequence[NDArray[np.uint8]], fps: float, dest: Path) -> Path
         input=b"".join(f.tobytes() for f in frames),
         check=True, capture_output=True,
     )  # fmt: skip
-    return dest
+    return Clip(dest, frames_sha256)

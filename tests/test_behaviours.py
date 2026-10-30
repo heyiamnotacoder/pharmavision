@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Any, Literal
 
+import cv2
 import pytest
 
 from pharmavision.artifacts import BehaviourEvent, BehaviourSettings
@@ -203,6 +204,17 @@ def test_only_short_clips_cropped_to_the_animal_reach_the_model(
         assert (width, height) == (256, 256)
         assert 2 * 15 <= n_frames <= 4 * 15
         assert n_frames < N_FRAMES
+        assert outlined_in_green(clip)
+
+
+def outlined_in_green(clip: Path) -> bool:
+    """The clip's first frame has the mask outline drawn in: bright green on a grey scene."""
+    capture = cv2.VideoCapture(str(clip))
+    ok, image = capture.read()
+    capture.release()
+    assert ok
+    blue, green, red = (image[..., c].astype(int) for c in range(3))
+    return bool(((green > 180) & (green - red > 100) & (green - blue > 100)).any())
 
 
 def test_a_malformed_judgement_fails_the_stage_and_is_not_cached(

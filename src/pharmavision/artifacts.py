@@ -290,7 +290,9 @@ class Metrics(Artifact):
 class BehaviourEvent(Artifact):
     """One judged rear candidate over frames `first_frame` to `last_frame` (inclusive): the
     candidate's own window, though the model saw a clip around it. Every candidate gets one, so
-    each verdict is auditable; a rear count is the events labelled "rearing"."""
+    each verdict is auditable; a rear count is the events labelled "rearing". For a window
+    longer than `BehaviourSettings.clip_max_s` the model saw only its middle: rears last about
+    a second, so the label stands for the window."""
 
     first_frame: int
     last_frame: int

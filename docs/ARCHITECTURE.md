@@ -175,7 +175,8 @@ purity.
   `{label: rearing | none, confidence, rationale}`: binary, as open decision 3 decided. The
   tier (`standard` or `contributor`) is `MuseSparkSettings.tier`, and the manifest records the
   resulting model id. Each response is cached under `<model>/clip-v1/<hash>`, the hash covering
-  the clip, the prompt, the schema, the sampling rate and the few-shot examples.
+  the clip's frames (not the MP4's bytes, which depend on the ffmpeg build), the prompt, the
+  schema, the sampling rate and the few-shot examples.
   `RecordedJudge` replays that cache by the same key and refuses a clip it has no response for,
   so a response captured on the laptop is a test fixture as is.
 - Calibration: few-shot examples (`MuseSparkSettings.few_shot`) go ahead of the clip as earlier

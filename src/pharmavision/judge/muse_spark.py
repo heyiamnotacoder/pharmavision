@@ -3,7 +3,8 @@
 One Responses request per clip, streamed, with structured output. The clip goes inline as a
 base64 MP4 sampled at `input_fps`; few-shot examples go ahead of it as earlier turns (a user
 turn with the example clip, then an assistant turn replaying its label). Every response is
-cached by model id, prompt version and the hash of the clip (and of the prompt and examples),
+cached by model id, prompt version and the hash of the clip's frames (and of the prompt and
+examples),
 so a re-run makes no API call, and the recorded Judge replays the same cache with no API at all."""
 
 import base64
@@ -17,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ..model_api import OpenAiTransport, Request, ResponsesTransport
 from ..model_cache import Event, ResponseCache, input_hash
-from . import ClipJudgement, RearLabel
+from . import Clip, ClipJudgement, RearLabel
 
 PROMPT_VERSION = "clip-v1"
 """The request shape and wording: bump it when either changes."""
@@ -115,23 +116,23 @@ class MuseSparkJudge:
     def model_id(self) -> str:
         return self.settings.model
 
-    def classify_clip(self, clip: Path) -> ClipJudgement:
-        data = clip.read_bytes()
+    def classify_clip(self, clip: Clip) -> ClipJudgement:
         digest = input_hash(
             "clip",
             PROMPT,
             FORMAT,
             str(self.settings.input_fps),
             *(f"{e.sha256} {e.reply}" for e in self._examples),
-            input_hash(data),
+            clip.frames_sha256,
         )
         model = self.settings.model
         cached = self.cache.get(model, PROMPT_VERSION, digest)
         if cached is not None:
             return _parse(cached)
-        events = list(self.transport.stream(self._request(_data_url(data))))
-        judgement = _parse(events)
-        self.cache.put(model, PROMPT_VERSION, digest, events)
+        request = self._request(_data_url(clip.video.read_bytes()))
+        stream = list(self.transport.stream(request))
+        judgement = _parse(stream)
+        self.cache.put(model, PROMPT_VERSION, digest, stream)
         return judgement
 
     def _request(self, clip_url: str) -> Request:
@@ -186,14 +187,14 @@ def _data_url(mp4: bytes) -> str:
     return f"data:video/mp4;base64,{base64.b64encode(mp4).decode()}"
 
 
-def _parse(events: Iterable[Event]) -> ClipJudgement:
+def _parse(stream: Iterable[Event]) -> ClipJudgement:
     """The judgement in a completed stream's output text."""
-    events = list(events)
-    kinds = {event.get("type") for event in events}
+    stream = list(stream)
+    kinds = {event.get("type") for event in stream}
     if "response.completed" not in kinds:
         raise JudgeResponseError(f"incomplete Muse Spark response: {sorted(map(str, kinds))}")
     text = "".join(
-        str(event["delta"]) for event in events if event.get("type") == "response.output_text.delta"
+        str(event["delta"]) for event in stream if event.get("type") == "response.output_text.delta"
     )
     try:
         return ClipJudgement.model_validate_json(text)

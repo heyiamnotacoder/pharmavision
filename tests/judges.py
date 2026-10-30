@@ -1,9 +1,8 @@
 """A stand-in Judge for tests that are not about the model: one fixed judgement for every clip."""
 
 from dataclasses import dataclass, field
-from pathlib import Path
 
-from pharmavision.judge import ClipJudgement
+from pharmavision.judge import Clip, ClipJudgement
 
 
 @dataclass
@@ -16,6 +15,6 @@ class ScriptedJudge:
     model_id: str = "scripted"
     clips: list[bytes] = field(default_factory=list[bytes])
 
-    def classify_clip(self, clip: Path) -> ClipJudgement:
-        self.clips.append(clip.read_bytes())
+    def classify_clip(self, clip: Clip) -> ClipJudgement:
+        self.clips.append(clip.video.read_bytes())
         return self.judgement
