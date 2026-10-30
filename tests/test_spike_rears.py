@@ -10,6 +10,7 @@ from spike.rears import (
     consensus_rears,
     load_rears,
     pick_clips,
+    rear_recall,
     train_eval_split,
 )
 
@@ -131,3 +132,23 @@ def test_agreement_kappa_is_undefined_when_chance_explains_everything() -> None:
     score = agreement(truth=["none", "none"], predicted=["none", "none"])
 
     assert (score.accuracy, score.kappa) == (1.0, None)
+
+
+def test_rear_recall_counts_the_rears_a_candidate_window_overlaps() -> None:
+    windows = [(10.0, 11.0), (20.0, 22.0), (40.0, 41.0)]
+    rears = [
+        rear("Jin", 10.5, 12.0),  # overlaps the first window
+        rear("Jin", 11.0, 12.0),  # only touches it
+        rear("Jin", 21.0, 21.5),  # inside the second
+        rear("Jin", 30.0, 31.0),  # in no window
+    ]
+
+    recall = rear_recall(rears, windows)
+
+    assert (recall.rears, recall.found, recall.recall) == (4, 2, 0.5)
+    # The third window holds no rear: 2 of 3 windows overlap one.
+    assert (recall.windows, recall.windows_on_a_rear) == (3, 2)
+
+
+def test_rear_recall_is_undefined_without_rears() -> None:
+    assert rear_recall([], [(1.0, 2.0)]).recall is None

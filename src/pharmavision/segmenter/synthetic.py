@@ -17,9 +17,10 @@ _SHIFT = 4
 
 class SyntheticSegmenter:
     """Ignores pixels and prompts: images always show `floor`, videos always show one animal
-    (a disc) at `trajectory(frame_index)`, and a second, less confident and larger object (an
-    intruding hand) at `intruder(frame_index)`. Like SAM 3.1, it skips frames where neither is
-    there, keeps the `max_objects` most confident, and with `shuffle_seed` delivers frames out of
+    at `trajectory(frame_index)`, an axis-aligned ellipse with semi-axes `body(frame_index)`
+    (along x, along y), and a second, less confident and larger object (an intruding hand, a
+    disc) at `intruder(frame_index)`. Like SAM 3.1, it skips frames where neither is there,
+    keeps the `max_objects` most confident, and with `shuffle_seed` delivers frames out of
     order."""
 
     model_id = "synthetic"
@@ -28,14 +29,14 @@ class SyntheticSegmenter:
         self,
         floor: Sequence[Point] = (),
         trajectory: Callable[[int], Point | None] = lambda _: None,
-        animal_radius_px: float = 8.0,
+        body: Callable[[int], tuple[float, float]] = lambda _: (8.0, 8.0),
         intruder: Callable[[int], Point | None] = lambda _: None,
         intruder_radius_px: float = 30.0,
         shuffle_seed: int | None = None,
     ) -> None:
         self.floor = floor
         self.trajectory = trajectory
-        self.animal_radius_px = animal_radius_px
+        self.body = body
         self.intruder = intruder
         self.intruder_radius_px = intruder_radius_px
         self.shuffle_seed = shuffle_seed
@@ -59,26 +60,32 @@ class SyntheticSegmenter:
         if self.shuffle_seed is not None:
             random.Random(self.shuffle_seed).shuffle(order)
         for index in order:
+            hand = (self.intruder_radius_px, self.intruder_radius_px)
             objects = [
-                Mask(self._disc(shape, centre, radius), confidence=confidence)
-                for centre, radius, confidence in (
-                    (self.trajectory(index), self.animal_radius_px, 0.9),
-                    (self.intruder(index), self.intruder_radius_px, 0.5),
+                Mask(self._ellipse(shape, centre, semi_axes), confidence=confidence)
+                for centre, semi_axes, confidence in (
+                    (self.trajectory(index), self.body(index), 0.9),
+                    (self.intruder(index), hand, 0.5),
                 )
                 if centre is not None
             ]
             if objects:
                 yield FrameMasks(index, tuple(objects[:max_objects]))
 
-    def _disc(self, shape: tuple[int, int], centre: Point, radius: float) -> NDArray[np.bool_]:
+    def _ellipse(
+        self, shape: tuple[int, int], centre: Point, semi_axes: tuple[float, float]
+    ) -> NDArray[np.bool_]:
         canvas = np.zeros(shape, dtype=np.uint8)
         # Fixed-point coordinates (4 fractional bits) so the centroid isn't snapped to the grid.
         scale = 1 << _SHIFT
         x, y = centre
-        cv2.circle(
+        cv2.ellipse(
             canvas,
             (round(x * scale), round(y * scale)),
-            round(radius * scale),
+            (round(semi_axes[0] * scale), round(semi_axes[1] * scale)),
+            angle=0,
+            startAngle=0,
+            endAngle=360,
             color=1,
             thickness=-1,
             shift=_SHIFT,

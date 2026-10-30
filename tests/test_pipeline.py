@@ -4,12 +4,13 @@ import hashlib
 import json
 import math
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 from shapely.geometry import Polygon
 
-from pharmavision.artifacts import Gap, MeasureSettings
+from pharmavision.artifacts import Gap, MeasureSettings, RearCandidate
 from pharmavision.pipeline import (
     ArenaNotConfirmedError,
     ArenaNotFoundError,
@@ -163,7 +164,10 @@ def test_an_animal_never_found_leaves_every_metric_unknown(tmp_path: Path, runs_
     assert not any(f.detected for f in run.track().frames)
     metrics = run.metrics()
     assert metrics.gaps == [Gap(first_frame=0, last_frame=N_FRAMES - 1, interpolated=False)]
-    assert all(value is None for value in metrics.model_dump(exclude={"gaps"}).values())
+    assert metrics.rear_candidates == []
+    assert all(
+        value is None for value in metrics.model_dump(exclude={"gaps", "rear_candidates"}).values()
+    )
 
 
 def test_the_manifest_records_the_versioned_measure_settings(
@@ -178,7 +182,7 @@ def test_the_manifest_records_the_versioned_measure_settings(
     )
 
     assert default_run.manifest().measure == MeasureSettings()
-    assert default_run.manifest().measure.version == 1
+    assert default_run.manifest().measure.version == 2
     assert custom_run.manifest().measure == custom
 
 
@@ -333,3 +337,61 @@ def test_the_same_video_and_settings_give_identical_metrics(tmp_path: Path, runs
     assert first == second
     for artifact in ("metrics.json", "qc.json"):
         assert (runs[0].path / artifact).read_bytes() == (runs[1].path / artifact).read_bytes()
+
+    assert (runs[0].path / "metrics.json").read_bytes() == (
+        runs[1].path / "metrics.json"
+    ).read_bytes()
+
+
+# A walking body, 10 x 7 px semi-axes (elongation 1.43), and a rear seen from above: the mask
+# shrinks to 8 x 4 px (46% of the area) and gets longer and thinner (elongation 2.0).
+WALKING_BODY = (10.0, 7.0)
+REAR = range(25, 40)  # 1 s
+
+
+def rears_in(episode: range) -> Callable[[int], tuple[float, float]]:
+    """The walking body, with the rear's body in the `episode` frames."""
+    return lambda i: (8.0, 4.0) if i in episode else WALKING_BODY
+
+
+def walk_stop_walk(i: int) -> tuple[float, float]:
+    """6 px per frame (13.5 cm/s) along the midline, standing still for frames 15-44."""
+    return (60.0 + 6 * (i if i < 15 else 15 if i < 45 else i - 30), 180.0)
+
+
+def test_a_still_shrink_and_elongate_episode_gives_one_rear_candidate(
+    tmp_path: Path, runs_dir: Path
+) -> None:
+    run = finished_run(tmp_path, runs_dir, walk_stop_walk, body=rears_in(REAR))
+
+    assert run.metrics().rear_candidates == [RearCandidate(first_frame=25, last_frame=39)]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param(lambda _: WALKING_BODY, id="walking normally"),
+        pytest.param(rears_in(REAR), id="shrinking and elongating at walking speed"),
+    ],
+)
+def test_walking_gives_no_rear_candidate(
+    body: Callable[[int], tuple[float, float]], tmp_path: Path, runs_dir: Path
+) -> None:
+    # 21.6 cm/s around a circle.
+    run = finished_run(tmp_path, runs_dir, circle_walk(radius_px=90), body=body)
+
+    assert run.metrics().rear_candidates == []
+
+
+def test_the_rear_thresholds_come_from_the_runs_measure_settings(
+    tmp_path: Path, runs_dir: Path
+) -> None:
+    # The episode keeps 46% of the walking area: not a drop of 60%.
+    strict = MeasureSettings(rear_area_drop=0.6)
+
+    run = finished_run(
+        tmp_path, runs_dir, walk_stop_walk, body=rears_in(REAR), measure_settings=strict
+    )
+
+    assert run.manifest().measure.rear_area_drop == 0.6
+    assert run.metrics().rear_candidates == []

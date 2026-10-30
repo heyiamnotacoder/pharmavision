@@ -4,7 +4,7 @@ import math
 from collections.abc import Callable
 from pathlib import Path
 
-from pharmavision.artifacts import QcSettings
+from pharmavision.artifacts import MeasureSettings, QcSettings
 from pharmavision.pipeline import RunFolder, confirm_arena, finish_run, start_run
 from pharmavision.segmenter.synthetic import SyntheticSegmenter
 from pharmavision.templates import OPEN_FIELD
@@ -37,12 +37,22 @@ def finished_run(
     trajectory: Trajectory,
     intruder: Trajectory = lambda _: None,
     qc_settings: QcSettings | None = None,
+    body: Callable[[int], tuple[float, float]] = lambda _: (8.0, 8.0),
+    measure_settings: MeasureSettings | None = None,
 ) -> RunFolder:
-    """A run through every stage, on a 4 s video, with the animal at `trajectory(frame)` and a
-    second, less confident object at `intruder(frame)`."""
+    """A run through every stage, on a 4 s video, with the animal at `trajectory(frame)`, its
+    body an ellipse with semi-axes `body(frame)` (along x, along y), and a second, less
+    confident object at `intruder(frame)`."""
     video = make_video(tmp_path / "trial.mp4", seconds=4)
-    segmenter = SyntheticSegmenter(floor=FLOOR, trajectory=trajectory, intruder=intruder)
-    run = start_run(video, TEMPLATE, segmenter, runs_dir, qc_settings=qc_settings)
+    segmenter = SyntheticSegmenter(floor=FLOOR, trajectory=trajectory, body=body, intruder=intruder)
+    run = start_run(
+        video,
+        TEMPLATE,
+        segmenter,
+        runs_dir,
+        measure_settings=measure_settings,
+        qc_settings=qc_settings,
+    )
     confirm_arena(run)
     finish_run(run, segmenter)
     return run

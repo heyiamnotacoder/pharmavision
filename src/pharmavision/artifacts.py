@@ -59,7 +59,7 @@ class MeasureSettings(Artifact):
     """Every threshold the measure stage uses. Times are in seconds and distances in cm, so a
     setting means the same at any fps or frame size."""
 
-    version: int = 1
+    version: int = 2
     """Bump when a default or a metric's definition changes, so metrics from different versions
     are never compared as if alike."""
     median_window_frames: int = Field(default=5, ge=1)
@@ -77,6 +77,24 @@ class MeasureSettings(Artifact):
     (symmetric difference over union)."""
     immobility_min_s: float = Field(default=1.0, ge=0)
     """Immobile frames count only in bouts at least this long."""
+    rear_baseline_s: float = Field(default=10.0, gt=0)
+    """The animal's usual mask area and elongation at each frame: their running median over
+    this window, centred on the frame. Local, not one value per trial, because the wide-angle
+    lens changes the animal's apparent size across the arena."""
+    rear_area_drop: float = Field(default=0.1, gt=0, lt=1)
+    """Rear candidate frame: the mask area is at least this fraction below its baseline, ..."""
+    rear_elongation_change: float = Field(default=0.1, gt=0)
+    """... the elongation (major over minor axis) differs from its baseline by at least this
+    fraction, either way, ..."""
+    rear_max_speed_cm_s: float = Field(default=10.0, ge=0)
+    """... and the centroid moves at most this fast. The defaults favour recall (about 110
+    windows over 16% of the time on Sturman OFT_16): stage 5 judges every candidate, but can
+    never find a rear that no candidate holds."""
+    rear_merge_s: float = Field(default=0.5, ge=0)
+    """A break of less than this between candidate frames joins them into one window, unless
+    the position is unknown somewhere in the break, so a flickering rear is one candidate."""
+    rear_min_s: float = Field(default=0.2, ge=0)
+    """A candidate window lasts at least this long."""
 
     @model_validator(mode="after")
     def _median_window_is_odd(self) -> "MeasureSettings":
@@ -203,6 +221,15 @@ class Gap(Artifact):
     interpolated: bool
 
 
+class RearCandidate(Artifact):
+    """A window of frames where the animal may be rearing: the mask shrank and changed shape
+    while the animal stayed in place. An input for the behaviours stage to judge, never a
+    result."""
+
+    first_frame: int
+    last_frame: int
+
+
 class Metrics(Artifact):
     """Per-trial metrics. None means the metric could not be computed, never zero."""
 
@@ -214,6 +241,7 @@ class Metrics(Artifact):
     """Fraction of the time with a known position spent near the wall, 0 to 1."""
     immobility_s: float | None
     gaps: list[Gap]
+    rear_candidates: list[RearCandidate]
 
 
 QcFlagKind = Literal["tracking_loss", "out_of_arena", "speed_jump", "second_mask"]
