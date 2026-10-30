@@ -1,7 +1,8 @@
 """Run one video through the pipeline from the command line (laptop: needs MODEL_API_KEY in .env).
 
     uv run python -m pharmavision start VIDEO      # ingest + arena; stops at the arena gate
-    uv run python -m pharmavision finish RUN_DIR   # confirm the arena, then track + measure
+    uv run python -m pharmavision finish RUN_DIR   # confirm the arena, then the other stages
+    uv run python -m pharmavision finish RUN_DIR --tier contributor   # public Sturman data only
 
 Check `arena.json` (floor and centre polygons, px) between the two steps: `finish` is the
 confirmation. Model responses are cached in runs/model_cache, so a re-run costs nothing."""
@@ -9,6 +10,7 @@ confirmation. Model responses are cached in runs/model_cache, so a re-run costs 
 import argparse
 from pathlib import Path
 
+from .judge.muse_spark import MuseSparkJudge, MuseSparkSettings
 from .pipeline import RunFolder, confirm_arena, finish_run, start_run
 from .segmenter.config import make_segmenter
 from .segmenter.meta_api import MetaApiSettings
@@ -21,8 +23,14 @@ def main() -> None:
     start = steps.add_parser("start", help="ingest a video and detect the arena")
     start.add_argument("video", type=Path)
     start.add_argument("--runs-dir", type=Path, default=Path("runs"))
-    finish = steps.add_parser("finish", help="confirm the arena, then track and measure")
+    finish = steps.add_parser("finish", help="confirm the arena, then every later stage")
     finish.add_argument("run_dir", type=Path)
+    finish.add_argument(
+        "--tier",
+        choices=["standard", "contributor"],
+        default="standard",
+        help="Muse Spark tier: Meta may train on Contributor-tier clips, so public data only",
+    )
     args = parser.parse_args()
 
     segmenter = make_segmenter(MetaApiSettings())
@@ -33,11 +41,13 @@ def main() -> None:
     else:
         run = RunFolder(args.run_dir)
         confirm_arena(run)
-        metrics = finish_run(run, segmenter)
+        judge = MuseSparkJudge(MuseSparkSettings(tier=args.tier))
+        metrics = finish_run(run, segmenter, judge)
         frames = run.track().frames
         tracked = sum(f.detected for f in frames)
         print(f"tracked {tracked}/{len(frames)} frames")
         print(metrics.model_dump_json(indent=2))
+        print(run.events().model_dump_json(indent=2))
 
 
 if __name__ == "__main__":

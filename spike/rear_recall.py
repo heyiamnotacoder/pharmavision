@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from pharmavision.artifacts import MeasureSettings
+from pharmavision.judge.muse_spark import MuseSparkJudge, MuseSparkSettings
 from pharmavision.measure.open_field import open_field_metrics
 from pharmavision.pipeline import RunFolder, Stage, confirm_arena, run_stage, start_run
 from pharmavision.segmenter import Segmenter
@@ -39,7 +40,8 @@ def tracked_run(video_id: str, segmenter: Segmenter) -> RunFolder:
     runs.mkdir(parents=True, exist_ok=True)
     run = start_run(VIDEOS / f"{video_id}.mp4", OPEN_FIELD, segmenter, runs)
     confirm_arena(run)
-    run_stage(run, Stage.TRACK, segmenter)
+    # Track only: the judge is never called. Contributor tier, as this is Sturman data.
+    run_stage(run, Stage.TRACK, segmenter, MuseSparkJudge(MuseSparkSettings(tier="contributor")))
     pointer.write_text(f"{run.path}\n")
     return run
 

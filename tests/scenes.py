@@ -4,11 +4,13 @@ import math
 from collections.abc import Callable
 from pathlib import Path
 
-from pharmavision.artifacts import MeasureSettings, QcSettings
+from pharmavision.artifacts import BehaviourSettings, MeasureSettings, QcSettings
+from pharmavision.judge import Judge
 from pharmavision.pipeline import RunFolder, confirm_arena, finish_run, start_run
 from pharmavision.segmenter.synthetic import SyntheticSegmenter
 from pharmavision.templates import OPEN_FIELD
 
+from .judges import ScriptedJudge
 from .videos import make_video
 
 TEMPLATE = OPEN_FIELD.model_copy(update={"protocol_duration_s": 3.0})
@@ -19,6 +21,21 @@ PX_PER_CM = 300 / 45
 N_FRAMES = 60  # 4 s at 15 fps
 
 Trajectory = Callable[[int], tuple[float, float] | None]
+
+# A walking body, 10 x 7 px semi-axes (elongation 1.43), and a rear seen from above: the mask
+# shrinks to 8 x 4 px (46% of the area) and gets longer and thinner (elongation 2.0).
+WALKING_BODY = (10.0, 7.0)
+REAR = range(25, 40)  # 1 s
+
+
+def rears_in(episode: range) -> Callable[[int], tuple[float, float]]:
+    """The walking body, with the rear's body in the `episode` frames."""
+    return lambda i: (8.0, 4.0) if i in episode else WALKING_BODY
+
+
+def walk_stop_walk(i: int) -> tuple[float, float]:
+    """6 px per frame (13.5 cm/s) along the midline, standing still for frames 15-44."""
+    return (60.0 + 6 * (i if i < 15 else 15 if i < 45 else i - 30), 180.0)
 
 
 def circle_walk(radius_px: float, laps: int = 1) -> Callable[[int], tuple[float, float]]:
@@ -39,10 +56,12 @@ def finished_run(
     qc_settings: QcSettings | None = None,
     body: Callable[[int], tuple[float, float]] = lambda _: (8.0, 8.0),
     measure_settings: MeasureSettings | None = None,
+    judge: Judge | None = None,
+    behaviour_settings: BehaviourSettings | None = None,
 ) -> RunFolder:
     """A run through every stage, on a 4 s video, with the animal at `trajectory(frame)`, its
     body an ellipse with semi-axes `body(frame)` (along x, along y), and a second, less
-    confident object at `intruder(frame)`."""
+    confident object at `intruder(frame)`. `judge` judges the rear candidates' clips."""
     video = make_video(tmp_path / "trial.mp4", seconds=4)
     segmenter = SyntheticSegmenter(floor=FLOOR, trajectory=trajectory, body=body, intruder=intruder)
     run = start_run(
@@ -52,7 +71,8 @@ def finished_run(
         runs_dir,
         measure_settings=measure_settings,
         qc_settings=qc_settings,
+        behaviour_settings=behaviour_settings,
     )
     confirm_arena(run)
-    finish_run(run, segmenter)
+    finish_run(run, segmenter, judge or ScriptedJudge())
     return run

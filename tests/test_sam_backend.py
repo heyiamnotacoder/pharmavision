@@ -18,6 +18,7 @@ from pharmavision.segmenter.config import make_segmenter
 from pharmavision.segmenter.meta_api import MetaApiSegmenter, MetaApiSettings
 from pharmavision.templates import OPEN_FIELD
 
+from .judges import ScriptedJudge
 from .sam_replay import (
     Event,
     Instance,
@@ -51,7 +52,7 @@ def test_the_recorded_oft_16_responses_give_its_arena_and_track(
 
     run = start_run(video, TEMPLATE, sam, runs_dir)
     confirm_arena(run)
-    finish_run(run, sam)
+    finish_run(run, sam, ScriptedJudge())
 
     # The recorded floor mask is a trapezoid filling most of its box, x 285-671 by y 159-471.
     floor, box = Polygon(run.arena().floor_px), box_polygon(285, 159, 671, 471)
@@ -69,7 +70,11 @@ def test_the_recorded_oft_16_responses_give_its_arena_and_track(
             left, top, right, bottom = boxes[frame.frame_index]
             assert left <= frame.position[0] <= right
             assert top <= frame.position[1] <= bottom
-    assert run.manifest().models == {"arena": "sam-3.1", "track": "sam-3.1"}
+    assert run.manifest().models == {
+        "arena": "sam-3.1",
+        "track": "sam-3.1",
+        "behaviours": "scripted",
+    }
     assert transport.uploaded_frame_counts == [N_FRAMES]
 
 
@@ -103,7 +108,7 @@ def tracked(tmp_path: Path, runs_dir: Path, sam: Segmenter) -> Track:
     video = make_video(tmp_path / "trial.mp4", seconds=4)
     run = start_run(video, TEMPLATE, sam, runs_dir)
     confirm_arena(run)
-    finish_run(run, sam)
+    finish_run(run, sam, ScriptedJudge())
     return run.track()
 
 

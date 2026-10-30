@@ -26,7 +26,7 @@ runs/<run_id>/
   arena.json         # zone polygons (px) + px_per_cm, confirmed flag
   track.parquet      # one row per frame: centroid, area, bbox, axes, orientation, mask RLE, gap flag, second-mask area
   metrics.json       # per-animal metric table (measures)
-  events.parquet     # behaviour events: start, end, label, confidence, source (rule | model)
+  events.parquet     # behaviour events: first/last frame, label, confidence, low_confidence, rationale, source (rule | model)
   qc.json            # flags with frame ranges, severity and reason; the exclusions they lead to
 ```
 
@@ -153,14 +153,41 @@ own `ruff.toml` that bans I/O, network and model imports, so `scripts/check.sh` 
 purity.
 
 ### 5. Behaviours (judges)
-- Cut 2–4 s clips around each **candidate window** from stage 4, with the mask overlay drawn
-  in. Never send the full video.
-- `muse-spark-1.3` (Responses API, `input_video` as base64 MP4 under 50 MB or a `file_id`,
-  structured output) returns
-  `{label: rearing_supported | rearing_unsupported | grooming | head_dip | none, confidence, rationale}`.
-- Calibration: few-shot examples come from the training split of the Sturman dataset only.
-  The evaluation split is never shown to the model.
-- Events are written with `source = model`. Low-confidence events go to the QC review list.
+- Cut a clip around each **candidate window** from stage 4 (`stages/behaviours.py`, T5b): the
+  window padded by `clip_pad_s` (0.5 s) each side, widened to `clip_min_s` (2 s) or cut to
+  `clip_max_s` (4 s) about its middle. The clip is a square crop around the animal's masks over
+  the clip, plus `crop_margin_cm` (4 cm), scaled to `clip_side_px` (256), with the tracked mask
+  outlined in green, encoded bit-exact as H.264 so the same frames always give the same bytes.
+  The video is read once for all clips. Never send the full video.
+- **Judge interface** (`judge/__init__.py`), the one boundary to the judges layer, like the
+  Segmenter for the sees layer:
+
+  ```python
+  class Judge(Protocol):
+      model_id: str  # recorded in the manifest per stage
+
+      def classify_clip(self, clip: Path) -> ClipJudgement: ...  # label, confidence, rationale
+  ```
+
+  QC review and the report agent join it in T6b and T9.
+- `MuseSparkJudge` (`judge/muse_spark.py`): `muse-spark-1.3` on the Responses API, streamed,
+  `input_video` as a base64 MP4 with `fps: 15`, structured output
+  `{label: rearing | none, confidence, rationale}`: binary, as open decision 3 decided. The
+  tier (`standard` or `contributor`) is `MuseSparkSettings.tier`, and the manifest records the
+  resulting model id. Each response is cached under `<model>/clip-v1/<hash>`, the hash covering
+  the clip, the prompt, the schema, the sampling rate and the few-shot examples.
+  `RecordedJudge` replays that cache by the same key and refuses a clip it has no response for,
+  so a response captured on the laptop is a test fixture as is.
+- Calibration: few-shot examples (`MuseSparkSettings.few_shot`) go ahead of the clip as earlier
+  turns, the example clip in a user turn and its label replayed in an assistant turn. They come
+  from the training split of the Sturman dataset only: the judge refuses an example whose video
+  is not in `eval/split.json`'s train list. The evaluation split is never shown to the model.
+- Every candidate becomes one event with `source = model`, so each verdict is auditable; a rear
+  count is the events labelled `rearing`. An event under `BehaviourSettings.min_confidence`
+  (0.6) is marked `low_confidence` and reported as such. The settings are versioned in the
+  manifest.
+- **Not yet measured:** the cropped, outlined, few-shot clips still have to be re-scored on the
+  20 T2 clips (laptop) before model labels are trusted (open decision 3).
 
 ### 6. QC (measures, then judges)
 - Deterministic flags (`measure/qc.py`, T6a), on the raw track, with every threshold in a

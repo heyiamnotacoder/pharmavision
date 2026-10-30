@@ -10,6 +10,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from .judge import RearLabel
 from .measure.geometry import Point
 from .templates import TestTemplate
 
@@ -131,6 +132,40 @@ class QcSettings(Artifact):
     (a jump out, then one back) is flagged over all of its frames."""
 
 
+class BehaviourSettings(Artifact):
+    """How the behaviours stage cuts the clip it shows the judge for each rear candidate, and
+    which judgements it marks as uncertain. Times in seconds and sizes in cm, like
+    `MeasureSettings`."""
+
+    version: int = 1
+    """Bump when a default or the way a clip is cut changes."""
+    clip_pad_s: float = Field(default=0.5, ge=0)
+    """Context before and after the candidate window, so the model sees the animal go up and
+    come down."""
+    clip_min_s: float = Field(default=2.0, gt=0)
+    """A clip is widened about the candidate to at least this long, ..."""
+    clip_max_s: float = Field(default=4.0, gt=0)
+    """... and a longer one is cut to this long, centred on the candidate. Muse Spark sees short
+    clips only, never the full video (cost control)."""
+    crop_margin_cm: float = Field(default=4.0, ge=0)
+    """The clip is cropped to a square around the animal's masks over the clip, with this
+    margin: on the whole frame the mouse fills about 2%, and zero-shot Muse Spark was near
+    chance (T2)."""
+    clip_side_px: int = Field(default=256, ge=16)
+    """The square crop is scaled to this many pixels a side. Even, for H.264's 4:2:0 chroma."""
+    min_confidence: float = Field(default=0.6, ge=0, le=1)
+    """A judgement below this confidence makes a low-confidence event, which the report lists
+    as such."""
+
+    @model_validator(mode="after")
+    def _clip_lengths_are_ordered(self) -> "BehaviourSettings":
+        if self.clip_min_s > self.clip_max_s:
+            raise ValueError("clip_min_s must not exceed clip_max_s")
+        if self.clip_side_px % 2:
+            raise ValueError(f"clip_side_px must be even, not {self.clip_side_px}")
+        return self
+
+
 class Manifest(Artifact):
     run_id: str
     created_at: datetime
@@ -139,6 +174,8 @@ class Manifest(Artifact):
     ingest: IngestSettings
     arena: ArenaSettings
     measure: MeasureSettings
+    behaviours: BehaviourSettings = BehaviourSettings()
+    """Defaulted so a run folder made before the behaviours stage existed still reads."""
     qc: QcSettings
     source: SourceVideo
     video: NormalisedVideo
@@ -250,6 +287,40 @@ class Metrics(Artifact):
     rear_candidates: list[RearCandidate]
 
 
+class BehaviourEvent(Artifact):
+    """One judged rear candidate over frames `first_frame` to `last_frame` (inclusive): the
+    candidate's own window, though the model saw a clip around it. Every candidate gets one, so
+    each verdict is auditable; a rear count is the events labelled "rearing"."""
+
+    first_frame: int
+    last_frame: int
+    label: RearLabel
+    confidence: float
+    low_confidence: bool
+    """The confidence is under `BehaviourSettings.min_confidence`: reported as uncertain."""
+    rationale: str
+    source: Literal["rule", "model"]
+
+
+EVENTS_SCHEMA = pa.schema(
+    [
+        ("first_frame", pa.int32()),
+        ("last_frame", pa.int32()),
+        ("label", pa.string()),
+        ("confidence", pa.float64()),
+        ("low_confidence", pa.bool_()),
+        ("rationale", pa.string()),
+        ("source", pa.string()),
+    ]
+)
+
+
+class Events(Artifact):
+    """Every behaviour event in the trial, in frame order."""
+
+    events: list[BehaviourEvent]
+
+
 QcFlagKind = Literal["tracking_loss", "out_of_arena", "speed_jump", "second_mask"]
 Severity = Literal["warning", "critical"]
 
@@ -333,6 +404,15 @@ class RunFolder:
 
     def write_metrics(self, metrics: Metrics) -> None:
         self._write("metrics.json", metrics)
+
+    def events(self) -> Events:
+        rows = pq.read_table(self.path / "events.parquet", schema=EVENTS_SCHEMA).to_pylist()
+        return Events.model_validate({"events": rows})
+
+    def write_events(self, events: Events) -> None:
+        rows = [event.model_dump() for event in events.events]
+        table = pa.Table.from_pylist(rows, schema=EVENTS_SCHEMA)
+        pq.write_table(table, self.path / "events.parquet")
 
     def qc(self) -> Qc:
         return self._read("qc.json", Qc)
