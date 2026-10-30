@@ -656,6 +656,63 @@ class StudyStats(Artifact):
     metrics: list[MetricStats]
 
 
+class AuditSettings(Artifact):
+    """What the number audit lets through without a match in the computed tables."""
+
+    version: int = 1
+    """Bump when a default or the matching rule changes."""
+    allowed_phrases: tuple[str, ...] = ("ARRIVE 2.0", "Essential 10", "SAM 3.1")
+    """Fixed names that hold a number but state no result; their numbers are not audited.
+    Matched whole and ignoring case. No "95% CI" here: its 95 must match the stats'
+    `ci_level`, so a study run at another level fails the audit instead of passing."""
+
+
+class KnownValue(Artifact):
+    """One number the report agent's tools returned, and where it came from: a field path such
+    as `stats.metrics[0].comparison.p`, or `len(qc.exclusions)` for a count of list items."""
+
+    source: str
+    value: float
+
+
+class AuditedNumber(Artifact):
+    """One number written in the prose, and the known value it matched. It matches when the
+    known value, rounded to the written precision, gives the written number: within half a unit
+    of its last written digit (3412.6 written as 3413). Magnitudes are compared, so "decreased
+    by 1.9" matches a difference of -1.9; a percent matches a known value times 100."""
+
+    text: str
+    """As written, such as "38%" or "1.6e-3"."""
+    value: float
+    """Its magnitude, in the written units (38 for "38%")."""
+    percent: bool
+    span: tuple[int, int]
+    """Its start and end offsets in the prose."""
+    sentence: str
+    sentence_span: tuple[int, int]
+    """The offsets of the sentence it appears in, so the report can strike that sentence."""
+    source: str | None
+    """The matched known value's source, the closest one; None when nothing matched."""
+
+
+class NumberAudit(Artifact):
+    """The number audit of one piece of report prose: every number found in it, matched or
+    not. Blocking: prose that has not passed never reaches the report (NFR-1)."""
+
+    settings: AuditSettings
+    numbers: list[AuditedNumber]
+    """In the order they appear."""
+
+    @property
+    def unmatched(self) -> list[AuditedNumber]:
+        """The numbers no computed table holds: the ones the report agent is re-prompted with."""
+        return [n for n in self.numbers if n.source is None]
+
+    @property
+    def passed(self) -> bool:
+        return not self.unmatched
+
+
 @dataclass(frozen=True)
 class _ArtifactFolder:
     """A folder of JSON artifacts; every read validates against the artifact's type."""

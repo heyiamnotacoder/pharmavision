@@ -55,3 +55,7 @@ _Avoid_: Detection, prediction
 **Consensus rear**:
 A rear that at least two of the three Sturman raters labelled as the same kind (supported or unsupported), with a time IoU of at least 0.5. It spans the time they share. The ground truth for rearing recall, because single raters disagree on where rears start and end.
 _Avoid_: True rear, gold rear
+
+**Number audit**:
+The blocking check on report prose: every number in it must round to a value in the computed tables (metrics, stats, QC counts), or the prose fails and the unmatched numbers are listed with their sentences. Numbers inside model-written text are never taken as known.
+_Avoid_: Fact check, validation (for this gate)
