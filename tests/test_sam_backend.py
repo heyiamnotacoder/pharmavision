@@ -45,6 +45,7 @@ def test_the_recorded_oft_16_responses_give_its_arena_and_track(
     # The Sturman frame size, so the recorded boxes and masks land where SAM 3.1 put them.
     video = make_video(tmp_path / "OFT_16.mp4", seconds=4, size=928, height=576)
     lines = recorded_track_lines(below_frame=N_FRAMES)  # the recording starts at frame 15
+    # Replayed in call order: the arena recording answered the plain (not equalised) frame.
     transport = ReplayTransport([read_fixture("OFT_16_arena"), responses_events(lines)])
     sam = segmenter(tmp_path / "cache", transport)
 

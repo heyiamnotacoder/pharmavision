@@ -77,9 +77,7 @@ class ImageSpy(SyntheticSegmenter):
         return super().segment_image(image, prompt)
 
 
-def test_the_floor_prompt_sees_the_background_with_its_contrast_stretched(
-    tmp_path: Path, runs_dir: Path
-) -> None:
+def test_the_floor_prompt_sees_the_background_equalised(tmp_path: Path, runs_dir: Path) -> None:
     # SAM 3.1 drops a floor it scores under about 0.5. On two Sturman cameras the plain
     # background frame scored just under, and the equalised one did not (Oct 30).
     video = make_video(tmp_path / "dim.mp4", seconds=4, floor_box=(100, 100, 160, 160))
@@ -87,13 +85,15 @@ def test_the_floor_prompt_sees_the_background_with_its_contrast_stretched(
 
     off = ArenaSettings(contrast_clip_limit=None)
     start_run(video, TEMPLATE, plain, runs_dir, arena_settings=off)
-    start_run(video, TEMPLATE, equalised, runs_dir)
+    run = start_run(video, TEMPLATE, equalised, runs_dir)
 
     def edge_step(image: NDArray[np.uint8]) -> float:
+        # Across the floor's left edge (x = 100) on its middle row, inside one CLAHE tile.
         grey = image.mean(axis=2)
         return float(grey[180, 102:108].mean() - grey[180, 92:98].mean())
 
     assert edge_step(equalised.images[0]) > edge_step(plain.images[0]) > 0
+    assert run.manifest().arena.contrast_clip_limit == ArenaSettings().contrast_clip_limit
 
 
 def test_ingest_normalises_the_video_and_records_the_source(tmp_path: Path, runs_dir: Path) -> None:
