@@ -183,12 +183,16 @@ purity.
   turns, the example clip in a user turn and its label replayed in an assistant turn. They come
   from the training split of the Sturman dataset only: the judge refuses an example whose video
   is not in `eval/split.json`'s train list. The evaluation split is never shown to the model.
+  The API takes at most 5 videos per request, so the settings refuse more than 4 examples. The
+  committed set (`judge/few_shot/`, 2 rears and 2 hard negatives, `few_shot_examples()`) is
+  **off by default**: it did not make the labels trustworthy (open decision 3).
 - Every candidate becomes one event with `source = model`, so each verdict is auditable; a rear
   count is the events labelled `rearing`. An event under `BehaviourSettings.min_confidence`
   (0.6) is marked `low_confidence` and reported as such. The settings are versioned in the
   manifest.
-- **Not yet measured:** the cropped, outlined, few-shot clips still have to be re-scored on the
-  20 T2 clips (laptop) before model labels are trusted (open decision 3).
+- **Measured Oct 30 (open decision 3): Muse Spark labels are not trusted for rear counts,**
+  zero-shot or few-shot. Rear counts must not come from model events until a measured rear
+  scorer replaces or gates them.
 
 ### 6. QC (measures, then judges)
 - Deterministic flags (`measure/qc.py`, T6a), on the raw track, with every threshold in a
@@ -366,7 +370,8 @@ the demo and write-up, the same way PaedScale published its validation table.
    **Rule:** measure settings v3 use the 0.91 row. Recall comes first; the candidates are a
    coarse filter and stage 5 carries the precision. "Well under half the time" is dropped
    (41%). More recall at less time needs a signal other than mask area, not more tuning.
-3. **Muse Spark on short clips. Measured Oct 30; label set decided: binary rearing / none.**
+3. **Muse Spark on short clips. Measured Oct 30; label set decided: binary rearing / none; model
+   rear labels not trusted, few-shot or not.**
    `python -m spike.muse_clips [fps]` asked `muse-spark-1.3-contributor` (zero-shot, whole-frame
    928×576 clips, no mask overlay) about 20 train-split clips: 8 supported and 8 unsupported rears
    that at least two raters agree on (time IoU ≥ 0.5), plus 4 windows with no rear as a control.
@@ -382,6 +387,37 @@ the demo and write-up, the same way PaedScale published its validation table.
    send clips cropped to the SAM mask, with the overlay drawn in, at `fps: 15`, with few-shot
    examples from the train split, and re-measure on the same 20 clips before trusting model
    labels. The rule-based rear candidates from stage 4 (open decision 2) carry more weight.
+
+   **Cropped clips, with and without few-shot (laptop, Oct 30).** `python -m spike.muse_few_shot
+   pool | build | score | again` cuts every clip the way stage 5 does (`cut_clips`: square crop,
+   mask outlined, 256 px, 15 fps) from the train videos' run folders. The few-shot pool is 84
+   rear-candidate clips from the 6 train videos: rears all three raters marked (≥ 0.6 s, mostly
+   inside the clip) and hard negatives (no rater's rear within 1 s). It keeps 2 s away from the
+   20 T2 clips and from OFT_16 540–600 s (the smoke run). From it, 4 examples, checked by eye:
+   a supported and an unsupported rear, a turn at the wall and a turn on the spot. The other
+   80 clips (34 rears, 46 hard negatives) are a held-out test of the same kind as the false
+   positives. Contributor tier; the smoke run is standard, like its baseline.
+
+   | Test | Zero-shot | Few-shot (4) |
+   |---|---|---|
+   | 20 T2 clips, cropped (16 rears) | acc 0.70, κ 0.06 | acc 0.70, κ 0.06 (6 labels flip) |
+   | 80 held-out pool clips | acc 0.47, κ 0.04, precision 0.44, recall 0.85 | acc 0.62, κ 0.30, precision 0.53, recall 0.91 |
+   | The same 80, asked again | acc 0.44, κ −0.03; 76% same label | acc 0.54, κ 0.13; 79% same label |
+   | Smoke clip, OFT_16 540–600 s (20 candidates) | precision 6/16, consensus rears 7/7 | precision 3/10, consensus rears 3/7 |
+   | Input tokens / clip | 2,300 | 9,900 |
+   | Cost / 20 clips, standard (contributor) | $0.18 ($0.01) | $0.37 ($0.03) |
+
+   - **Muse Spark is near chance on hard negatives and unstable:** a re-ask changes about 1
+     label in 4, which is as large as the few-shot gain. Few-shot helps on the held-out pool,
+     not on T2, and is worse on the smoke clip.
+   - **The mask features already separate better.** On all 900 train-split candidates that are
+     a consensus rear or a hard negative, a logistic fit on duration, area drop, elongation
+     change and speed, scored leave-one-video-out, gives AUC 0.75, κ 0.37, precision 0.71,
+     recall 0.74 (one-off check, not kept in the repo).
+
+   **Rule:** few-shot stays off by default and the model's rear labels are not trusted. Rear
+   detection moves to a measured scorer on the mask features (measures layer), fitted on the
+   train split and checked on the eval split; Muse Spark keeps the rationale at most.
 4. **Frontend stack. Decided Oct 29:** Vite + React + TypeScript (strict), because the overlay and
    zone editor are the demo.
 5. **Python environment. Decided Oct 29:** `uv`, Python 3.12, `ruff` everywhere, `pyright` strict on
@@ -401,3 +437,4 @@ the demo and write-up, the same way PaedScale published its validation table.
 | `input_video` takes `video_url` (public or base64 data URL) or `file_id`, plus an optional `fps`. Structured output is `text.format` with `type: "json_schema"`. (Checked Oct 30.) | [Responses schemas](https://dev.meta.ai/docs/api-reference/responses/schemas.md) |
 | Sturman open-field videos: 928×576, 25 fps, about 609 s (15,234 frames), wide-angle lens, burned-in timestamp. (Checked Oct 30.) | `ffprobe` on the downloaded files |
 | Muse Spark video tokens, measured: a 2–4 s 928×576 clip costs about 731 input tokens at the default sampling and 5,170 with `fps: 15`. Not found online: a video duration limit. | `spike.muse_clips`, Oct 30 |
+| Muse Spark takes at most 5 videos in one request (a 400 above it); assistant turns replaying earlier output work as few-shot turns. A repeated few-shot prefix is not cached (`cached_tokens` 0). A cropped 256 px, 2–4 s clip at `fps: 15` is about 2,300 input tokens, plus about 1,500 output tokens, mostly reasoning. | Live requests, `spike.muse_few_shot`, Oct 30 |

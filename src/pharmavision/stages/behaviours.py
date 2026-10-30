@@ -6,7 +6,7 @@ the arena. The video is read once for all clips; the model never sees the full v
 
 import subprocess
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 
 import cv2
@@ -33,46 +33,54 @@ Box = tuple[int, int, int]
 
 
 def run(run: RunFolder, judge: Judge) -> None:
+    run.confirmed_arena()  # the gate, before reading anything else
+    settings, video = run.manifest().behaviours, run.manifest().video
+    candidates = run.metrics().rear_candidates
+    spans = [clip_span(c, video, settings) for c in candidates]
+    events: dict[int, BehaviourEvent] = {}
+    with tempfile.TemporaryDirectory() as tmp:
+        for k, clip in cut_clips(run, spans, Path(tmp)):
+            judgement = judge.classify_clip(clip)
+            events[k] = BehaviourEvent(
+                first_frame=candidates[k].first_frame,
+                last_frame=candidates[k].last_frame,
+                label=judgement.label,
+                confidence=judgement.confidence,
+                low_confidence=judgement.confidence < settings.min_confidence,
+                rationale=judgement.rationale,
+                source="model",
+            )
+    run.write_events(Events(events=[events[k] for k in range(len(spans))]))
+
+
+def cut_clips(run: RunFolder, spans: Sequence[range], dest: Path) -> Iterator[tuple[int, Clip]]:
+    """Each span's clip, cropped and outlined, as `dest/<k>.mp4` for the k-th span. The video is
+    read once, front to back, so clips come in the order their spans end."""
     arena = run.confirmed_arena()
     manifest = run.manifest()
     settings, video = manifest.behaviours, manifest.video
-    candidates = run.metrics().rear_candidates
     frames = run.track().frames
-    spans = [clip_span(c, video, settings) for c in candidates]
     margin_px = settings.crop_margin_cm * arena.px_per_cm
     boxes = [_crop_box(frames[span.start : span.stop], video, margin_px) for span in spans]
-    events: dict[int, BehaviourEvent] = {}
     buffers: dict[int, list[NDArray[np.uint8]]] = {k: [] for k in range(len(spans))}
     capture = cv2.VideoCapture(str(run.video_path))
     try:
-        with tempfile.TemporaryDirectory() as tmp:
-            clip_path = Path(tmp) / "clip.mp4"
-            last_needed = max((span.stop for span in spans), default=0)
-            for index in range(last_needed):
-                ok, image = capture.read()
-                if not ok:
-                    raise RuntimeError(f"{run.video_path.name}: could not read frame {index}")
-                for k, span in enumerate(spans):
-                    if index not in span:
-                        continue
-                    crop = _clip_frame(
-                        np.asarray(image, dtype=np.uint8), frames[index], video, boxes[k], settings
-                    )
-                    buffers[k].append(crop)
-                    if index == span.stop - 1:
-                        judgement = judge.classify_clip(_clip(buffers.pop(k), video.fps, clip_path))
-                        events[k] = BehaviourEvent(
-                            first_frame=candidates[k].first_frame,
-                            last_frame=candidates[k].last_frame,
-                            label=judgement.label,
-                            confidence=judgement.confidence,
-                            low_confidence=judgement.confidence < settings.min_confidence,
-                            rationale=judgement.rationale,
-                            source="model",
-                        )
+        last_needed = max((span.stop for span in spans), default=0)
+        for index in range(last_needed):
+            ok, image = capture.read()
+            if not ok:
+                raise RuntimeError(f"{run.video_path.name}: could not read frame {index}")
+            for k, span in enumerate(spans):
+                if index not in span:
+                    continue
+                crop = _clip_frame(
+                    np.asarray(image, dtype=np.uint8), frames[index], video, boxes[k], settings
+                )
+                buffers[k].append(crop)
+                if index == span.stop - 1:
+                    yield k, _clip(buffers.pop(k), video.fps, dest / f"{k}.mp4")
     finally:
         capture.release()
-    run.write_events(Events(events=[events[k] for k in range(len(spans))]))
 
 
 def clip_span(

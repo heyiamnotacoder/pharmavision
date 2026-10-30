@@ -6,10 +6,12 @@ from typing import Any, Literal
 
 import cv2
 import pytest
+from pydantic import ValidationError
 
 from pharmavision.artifacts import BehaviourEvent, BehaviourSettings
 from pharmavision.judge import ClipJudgement
 from pharmavision.judge.muse_spark import (
+    MAX_VIDEOS,
     FewShotExample,
     FewShotLeakError,
     JudgeResponseError,
@@ -17,6 +19,7 @@ from pharmavision.judge.muse_spark import (
     MuseSparkSettings,
     RecordedJudge,
     RecordingMissingError,
+    few_shot_examples,
 )
 from pharmavision.pipeline import RunFolder
 
@@ -266,3 +269,21 @@ def test_few_shot_examples_go_ahead_of_the_clip_with_their_labels(
         "confidence": 1.0,
         "rationale": "Rater rear.",
     }
+
+
+def test_the_committed_few_shot_set_is_short_clips_of_both_labels_from_the_train_split() -> None:
+    examples = few_shot_examples()
+
+    MuseSparkJudge(MuseSparkSettings(few_shot=examples), ReplayTransport([]))  # no leak
+    assert {e.label for e in examples} == {"rearing", "none"}
+    for example in examples:
+        width, height, frames = frame_size_and_count(example.clip)
+        assert (width, height) == (256, 256)
+        assert 2 * 15 <= frames <= 4 * 15
+
+
+def test_a_few_shot_set_over_the_api_video_limit_is_refused(tmp_path: Path) -> None:
+    examples = tuple(few_shot_example(tmp_path, "OFT_16") for _ in range(MAX_VIDEOS))
+
+    with pytest.raises(ValidationError, match="few_shot"):
+        MuseSparkSettings(few_shot=examples)
