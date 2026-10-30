@@ -289,12 +289,13 @@ the demo and write-up, the same way PaedScale published its validation table.
 2. **Rearing from a top-down camera.** The Sturman videos are confirmed top view, so rearing shows
    up only as mask shrink and elongation change. Measure how well the rule-based candidates find
    human-labelled rears before building stage 5 on them. **Candidates built (T5a, measure
-   settings v2); recall not yet measured.** `python -m spike.rear_recall [setting=value ...]`
+   settings v2); recall measured Oct 30; decided: measure settings v3 favour recall, consensus
+   recall 0.91 over 41% of the time ([ADR 0001](adr/0001-rear-candidates-favour-recall.md)).**
+   `python -m spike.rear_recall [setting=value ...]`
    tracks the 6 train videos once (about $11 of SAM 3.1, cached), then counts the labelled rears
    that some candidate window overlaps, per rater, pooled and for consensus rears, and how many
    windows overlap a rear. Overlap, not containment, because stage 5 judges a 2–4 s clip cut
-   around each window. Re-running with other thresholds costs nothing. Record the result here
-   and tune the defaults before T5b.
+   around each window. Re-running with other thresholds costs nothing.
 
    Count check without labels (cloud, Oct 30), on the committed OFT_16 track (9,142 frames;
    the measure stage takes 21 s): the first defaults (area drop 0.2, elongation change 0.15,
@@ -308,11 +309,35 @@ the demo and write-up, the same way PaedScale published its validation table.
    | 0.2 | 0.15 | 5 cm/s | 21 | 2.0% |
    | 0.15 | 0.15 | 10 cm/s | 61 | 6.8% |
    | 0.1 | 0.15 | 10 cm/s | 100 | 12.4% |
-   | **0.1** | **0.1** | **10 cm/s** | **110** | **15.8%** |
+   | 0.1 | 0.1 | 10 cm/s | 110 | 15.8% (v2) |
 
-   **Proposed rule (owner to confirm):** stage 5 can only label rears that some candidate's
-   clip shows, so candidate recall bounds rearing recall. Aim for consensus recall ≥ 0.9 with
-   the candidates covering well under half of the video time.
+   The goal set before measuring: stage 5 can only label rears that some candidate's clip
+   shows, so candidate recall bounds rearing recall. Aim for consensus recall ≥ 0.9 with the
+   candidates covering well under half of the video time.
+
+   **Recall on the train split (laptop, Oct 30).** 6 videos, 503 consensus rears (at least two
+   raters), equalised arenas (#27); SAM 3.1 tracking cost about $11. The three raters give
+   recalls within 0.02 of each other at every setting, so only consensus is shown. Clip cost
+   is windows × $0.016.
+
+   | Area drop | Elongation change | Max speed | Min length | Consensus recall | Per video | Windows / video | Time | Muse Spark / video |
+   |---|---|---|---|---|---|---|---|---|
+   | 0.1 | 0.1 | 10 cm/s | 0.2 s | 0.59 (299 / 503) | 0.51–0.67 | 105 | 14.7% | $1.70 |
+   | 0.05 | 0.1 | 10 cm/s | 0.2 s | 0.76 | 0.70–0.80 | 150 | 25.5% | $2.40 |
+   | 0.05 | 0.05 | 15 cm/s | 0.1 s | 0.85 (427 / 503) | 0.79–0.90 | 175 | 33.4% | $2.80 |
+   | **0.03** | **0.05** | **15 cm/s** | **0.1 s** | **0.91 (456 / 503), v3** | 0.85–0.96 | 182 | 40.7% | $2.90 |
+
+   - **The area drop is the limit.** Only 78% of consensus rears have any frame with the mask
+     10% below its baseline. Elongation (99.6%) and speed (100%) almost never exclude a rear.
+     Reaching 0.9 takes a 3% drop, and then the windows cover 41% of the time.
+   - 45–51% of windows overlap a consensus rear at every setting above.
+   - A longer baseline (30, 60, 120 s in place of 10 s) lowers recall at every area drop.
+   - The rows above come from `spike.rear_recall`. The per-rule reach and the baseline sweep
+     came from a one-off sweep over the same stored tracks, not kept in the repo.
+
+   **Rule:** measure settings v3 use the 0.91 row. Recall comes first; the candidates are a
+   coarse filter and stage 5 carries the precision. "Well under half the time" is dropped
+   (41%). More recall at less time needs a signal other than mask area, not more tuning.
 3. **Muse Spark on short clips. Measured Oct 30; label set decided: binary rearing / none.**
    `python -m spike.muse_clips [fps]` asked `muse-spark-1.3-contributor` (zero-shot, whole-frame
    928×576 clips, no mask overlay) about 20 train-split clips: 8 supported and 8 unsupported rears

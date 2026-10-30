@@ -31,3 +31,7 @@ _Avoid_: Rejection, filter, drop
 **Rear candidate**:
 A window of frames where the animal may be rearing: its mask shrank and changed shape while it stayed in place. Found by rules in the measure stage, then judged by the behaviours stage; a candidate is never counted as a rear itself.
 _Avoid_: Rear, rearing event (for an unjudged window)
+
+**Consensus rear**:
+A rear that at least two of the three Sturman raters labelled as the same kind (supported or unsupported), with a time IoU of at least 0.5. It spans the time they share. The ground truth for rearing recall, because single raters disagree on where rears start and end.
+_Avoid_: True rear, gold rear

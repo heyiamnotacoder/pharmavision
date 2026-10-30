@@ -214,7 +214,7 @@ def test_the_manifest_records_the_versioned_measure_settings(
     )
 
     assert default_run.manifest().measure == MeasureSettings()
-    assert default_run.manifest().measure.version == 2
+    assert default_run.manifest().measure.version == 3
     assert custom_run.manifest().measure == custom
 
 
@@ -411,6 +411,15 @@ def test_walking_gives_no_rear_candidate(
 ) -> None:
     # 21.6 cm/s around a circle.
     run = finished_run(tmp_path, runs_dir, circle_walk(radius_px=90), body=body)
+
+    assert run.metrics().rear_candidates == []
+
+
+def test_standing_still_with_the_usual_body_gives_no_rear_candidate(
+    tmp_path: Path, runs_dir: Path
+) -> None:
+    # Still for 2 s, under every speed limit: only the mask can rule it out.
+    run = finished_run(tmp_path, runs_dir, walk_stop_walk, body=lambda _: WALKING_BODY)
 
     assert run.metrics().rear_candidates == []
 
