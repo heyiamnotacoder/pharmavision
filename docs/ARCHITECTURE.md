@@ -136,7 +136,7 @@ This is the most heavily tested module.
 | Thigmotaxis | Fraction of frames with a known position within `thigmotaxis_wall_cm` of the floor-polygon edge (or beyond it). |
 | Immobility | Mask change between consecutive frames, 1 − IoU on the stored RLE. A bout is a stretch of changes below `immobility_change_max`; k of them join k + 1 frames, and the bout counts if those frames last at least `immobility_min_s`. |
 | Freezing | Velocity and mask change both below threshold for ≥ the minimum duration. |
-| Rear candidates | Rule-based windows: mask area drop + elongation change + low centroid velocity. These are *candidates* for stage 5, not results. |
+| Rear candidates | Rule-based windows, listed in `metrics.json` as `rear_candidates` (first and last frame). A candidate frame has a mask area at least `rear_area_drop` below its baseline, an elongation (major over minor axis, from the mask's second moments) at least `rear_elongation_change` away from its baseline either way, and a centroid speed of at most `rear_max_speed_cm_s`. Each baseline is a running median over `rear_baseline_s` centred on the frame, because the wide-angle lens changes the apparent size of the animal across the arena. Candidate frames less than `rear_merge_s` apart join one window unless a kept gap lies between them; windows shorter than `rear_min_s` are dropped. These are *candidates* for stage 5, not results. |
 
 Every threshold is a named parameter in a versioned `MeasureSettings`, recorded in the manifest
 when the run starts, with distances in cm and times in seconds (the filter window is in frames).
@@ -264,7 +264,14 @@ the demo and write-up, the same way PaedScale published its validation table.
    10-min video; above that, self-host on Modal or process fewer eval videos.
 2. **Rearing from a top-down camera.** The Sturman videos are confirmed top view, so rearing shows
    up only as mask shrink and elongation change. Measure how well the rule-based candidates find
-   human-labelled rears before building stage 5 on them.
+   human-labelled rears before building stage 5 on them. **Candidates built (T5a, measure
+   settings v2); recall not yet measured.** `python -m spike.rear_recall [setting=value ...]`
+   tracks the 6 train videos once (about $11 of SAM 3.1, cached), then counts the labelled rears
+   that some candidate window overlaps, per rater, pooled and for consensus rears, and how many
+   windows overlap a rear. Re-running with other thresholds costs nothing. Record the result
+   here and tune the defaults before T5b. **Rule:** stage 5 can only label rears that a candidate
+   window contains, so recall bounds rearing recall; aim for consensus recall ≥ 0.9 with the
+   candidates covering well under half of the video time.
 3. **Muse Spark on short clips. Measured Oct 30; label set decided: binary rearing / none.**
    `python -m spike.muse_clips [fps]` asked `muse-spark-1.3-contributor` (zero-shot, whole-frame
    928×576 clips, no mask overlay) about 20 train-split clips: 8 supported and 8 unsupported rears

@@ -175,3 +175,33 @@ def agreement(truth: list[str], predicted: list[str]) -> Agreement:
     chance = sum(truth_counts[k] * predicted_counts[k] for k in truth_counts) / n**2
     kappa = None if chance == 1 else (observed - chance) / (1 - chance)
     return Agreement(n=n, accuracy=observed, kappa=kappa)
+
+
+@dataclass(frozen=True)
+class Recall:
+    """How many labelled rears overlap a rear-candidate window, and how many windows overlap a
+    labelled rear (the share of clips stage 5 would spend on a real rear)."""
+
+    rears: int
+    found: int
+    windows: int
+    windows_on_a_rear: int
+
+    @property
+    def recall(self) -> float | None:
+        return self.found / self.rears if self.rears else None
+
+
+def rear_recall(rears: list[Rear], windows: list[tuple[float, float]]) -> Recall:
+    """Rears against candidate windows, both in seconds. A rear is found when some window
+    overlaps it for a non-zero time; touching at an end is not enough."""
+
+    def overlaps(r: Rear, window: tuple[float, float]) -> bool:
+        return min(r.end, window[1]) > max(r.start, window[0])
+
+    return Recall(
+        rears=len(rears),
+        found=sum(any(overlaps(r, w) for w in windows) for r in rears),
+        windows=len(windows),
+        windows_on_a_rear=sum(any(overlaps(r, w) for r in rears) for w in windows),
+    )

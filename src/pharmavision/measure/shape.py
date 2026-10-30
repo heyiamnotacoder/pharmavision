@@ -1,6 +1,7 @@
 """Shape features of binary masks, and how a mask changes from one frame to the next."""
 
 import itertools
+import warnings
 from collections.abc import Sequence
 from typing import NamedTuple
 
@@ -29,6 +30,29 @@ def mask_changes(rles: Sequence[str | None], height: int, width: int) -> list[fl
         _mask_change(a, b, height, width) if a is not None and b is not None else None
         for a, b in itertools.pairwise(rles)
     ]
+
+
+def mask_elongations(rles: Sequence[str | None], height: int, width: int) -> list[float | None]:
+    """Each frame's mask elongation, None where the mask is missing or has no width."""
+    return [_elongation(rle, height, width) if rle is not None else None for rle in rles]
+
+
+def _elongation(rle: str, height: int, width: int) -> float | None:
+    """Major over minor axis of the ellipse with the mask's second moments: 1 for a disc, a / b
+    for an ellipse with semi-axes a and b. None for a mask that is a line or a point."""
+    with warnings.catch_warnings():
+        # pycocotools' Cython decoder predates NumPy 2's `copy` keyword; the result is right.
+        warnings.filterwarnings("ignore", "__array__ implementation", DeprecationWarning)
+        decoded: NDArray[np.uint8] = coco_mask.decode(
+            {"size": [height, width], "counts": rle.encode("ascii")}
+        )
+    rows, cols = np.nonzero(decoded)
+    if rows.size < 2:
+        return None
+    (var_x, cov), (_, var_y) = np.cov(np.stack([cols, rows]).astype(np.float64)).tolist()
+    spread = float(np.hypot((var_x - var_y) / 2, cov))
+    major, minor = (var_x + var_y) / 2 + spread, (var_x + var_y) / 2 - spread
+    return float(np.sqrt(major / minor)) if minor > 0 else None
 
 
 def _mask_change(before_rle: str, after_rle: str, height: int, width: int) -> float:

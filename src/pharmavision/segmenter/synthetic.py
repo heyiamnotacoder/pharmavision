@@ -17,8 +17,9 @@ _SHIFT = 4
 
 class SyntheticSegmenter:
     """Ignores pixels and prompts: images always show `floor`, videos always show one animal
-    (a disc) at `trajectory(frame_index)`. Like SAM 3.1, it skips frames where the trajectory
-    returns None, and with `shuffle_seed` it delivers frames out of order."""
+    at `trajectory(frame_index)`, an axis-aligned ellipse with semi-axes `body(frame_index)`
+    (along x, along y). Like SAM 3.1, it skips frames where the trajectory returns None, and
+    with `shuffle_seed` it delivers frames out of order."""
 
     model_id = "synthetic"
 
@@ -26,12 +27,12 @@ class SyntheticSegmenter:
         self,
         floor: Sequence[Point] = (),
         trajectory: Callable[[int], Point | None] = lambda _: None,
-        animal_radius_px: float = 8.0,
+        body: Callable[[int], tuple[float, float]] = lambda _: (8.0, 8.0),
         shuffle_seed: int | None = None,
     ) -> None:
         self.floor = floor
         self.trajectory = trajectory
-        self.animal_radius_px = animal_radius_px
+        self.body = body
         self.shuffle_seed = shuffle_seed
 
     def segment_image(self, image: NDArray[np.uint8], prompt: str) -> list[Mask]:
@@ -55,17 +56,23 @@ class SyntheticSegmenter:
         for index in order:
             position = self.trajectory(index)
             if position is not None:
-                yield FrameMasks(index, (Mask(self._disc(shape, position), confidence=0.9),))
+                mask = self._ellipse(shape, position, self.body(index))
+                yield FrameMasks(index, (Mask(mask, confidence=0.9),))
 
-    def _disc(self, shape: tuple[int, int], centre: Point) -> NDArray[np.bool_]:
+    def _ellipse(
+        self, shape: tuple[int, int], centre: Point, semi_axes: tuple[float, float]
+    ) -> NDArray[np.bool_]:
         canvas = np.zeros(shape, dtype=np.uint8)
         # Fixed-point coordinates (4 fractional bits) so the centroid isn't snapped to the grid.
         scale = 1 << _SHIFT
         x, y = centre
-        cv2.circle(
+        cv2.ellipse(
             canvas,
             (round(x * scale), round(y * scale)),
-            round(self.animal_radius_px * scale),
+            (round(semi_axes[0] * scale), round(semi_axes[1] * scale)),
+            angle=0,
+            startAngle=0,
+            endAngle=360,
             color=1,
             thickness=-1,
             shift=_SHIFT,

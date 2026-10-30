@@ -1,10 +1,11 @@
 """Open field metrics: the track and the confirmed arena to one trial's numbers."""
 
 from ..artifacts import Arena, MeasureSettings, Metrics, NormalisedVideo, Track
-from .distance import distance_travelled_cm, mean_velocity_cm_s
+from .distance import distance_travelled_cm, mean_velocity_cm_s, speeds_cm_s
 from .geometry import Point, signed_distance
 from .immobility import immobility_s
-from .shape import mask_changes
+from .rears import rear_candidates
+from .shape import mask_changes, mask_elongations
 from .trajectory import clean_trajectory
 from .zones import zone_occupancy
 
@@ -31,7 +32,8 @@ def open_field_metrics(
     )
     wall_px = settings.thigmotaxis_wall_cm * arena.px_per_cm
     near_wall = [d <= wall_px for d in signed_distance(known, arena.floor_px)]
-    changes = mask_changes([f.mask_rle for f in track.frames], video.height, video.width)
+    rles = [f.mask_rle for f in track.frames]
+    changes = mask_changes(rles, video.height, video.width)
     return Metrics(
         distance_travelled_cm=distance_travelled_cm(trajectory.points, arena.px_per_cm),
         mean_velocity_cm_s=mean_velocity_cm_s(trajectory.points, arena.px_per_cm, fps),
@@ -42,6 +44,13 @@ def open_field_metrics(
             changes, fps, settings.immobility_change_max, settings.immobility_min_s
         ),
         gaps=trajectory.gaps,
+        rear_candidates=rear_candidates(
+            [f.area_px if f.detected else None for f in track.frames],
+            mask_elongations(rles, video.height, video.width),
+            speeds_cm_s(trajectory.points, arena.px_per_cm, fps),
+            fps,
+            settings,
+        ),
     )
 
 
