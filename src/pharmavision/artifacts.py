@@ -1,10 +1,12 @@
 """The typed run-folder contract. Every artifact is a Pydantic model; the type is the contract
 between stages, and every read validates against it."""
 
+import os
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Literal, get_args
+from typing import ClassVar, Literal, get_args
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -713,22 +715,51 @@ class NumberAudit(Artifact):
         return not self.unmatched
 
 
+RunArtifactName = Literal["manifest", "arena", "track", "metrics", "events", "qc"]
+StudyArtifactName = Literal["design", "trials", "stats"]
+
+
 @dataclass(frozen=True)
 class _ArtifactFolder:
-    """A folder of JSON artifacts; every read validates against the artifact's type."""
+    """A folder of artifacts; every read validates against the artifact's type, and every
+    write replaces the file whole, so a reader never sees half of one."""
 
     path: Path
 
+    FILES: ClassVar[Mapping[str, str]] = {}
+    """Each artifact's file in the folder, by artifact name: the folder layout."""
+
+    def has(self, name: str) -> bool:
+        """Whether the artifact has been written."""
+        return (self.path / self.FILES[name]).is_file()
+
     def _read[A: Artifact](self, name: str, kind: type[A]) -> A:
-        return kind.model_validate_json((self.path / name).read_text())
+        return kind.model_validate_json((self.path / self.FILES[name]).read_text())
 
     def _write(self, name: str, artifact: Artifact) -> None:
-        (self.path / name).write_text(artifact.model_dump_json(indent=2) + "\n")
+        text = artifact.model_dump_json(indent=2) + "\n"
+        self._replace(name, lambda tmp: tmp.write_text(text))
+
+    def _replace(self, name: str, write: Callable[[Path], object]) -> None:
+        path = self.path / self.FILES[name]
+        tmp = path.with_name(f".{path.name}.tmp")
+        write(tmp)
+        os.replace(tmp, path)
 
 
 @dataclass(frozen=True)
 class RunFolder(_ArtifactFolder):
     """One run's folder on disk, with typed reads and writes for each artifact."""
+
+    FILES: ClassVar[Mapping[str, str]] = {
+        "manifest": "manifest.json",
+        "video": "video.mp4",
+        "arena": "arena.json",
+        "track": "track.parquet",
+        "metrics": "metrics.json",
+        "events": "events.parquet",
+        "qc": "qc.json",
+    }
 
     @property
     def run_id(self) -> str:
@@ -736,16 +767,28 @@ class RunFolder(_ArtifactFolder):
 
     @property
     def video_path(self) -> Path:
-        return self.path / "video.mp4"
+        return self.path / self.FILES["video"]
+
+    def read(self, name: RunArtifactName) -> Artifact:
+        """Any artifact by its name."""
+        readers: dict[RunArtifactName, Callable[[], Artifact]] = {
+            "manifest": self.manifest,
+            "arena": self.arena,
+            "track": self.track,
+            "metrics": self.metrics,
+            "events": self.events,
+            "qc": self.qc,
+        }
+        return readers[name]()
 
     def manifest(self) -> Manifest:
-        return self._read("manifest.json", Manifest)
+        return self._read("manifest", Manifest)
 
     def write_manifest(self, manifest: Manifest) -> None:
-        self._write("manifest.json", manifest)
+        self._write("manifest", manifest)
 
     def arena(self) -> Arena:
-        return self._read("arena.json", Arena)
+        return self._read("arena", Arena)
 
     def confirmed_arena(self) -> Arena:
         """The arena gate. Every stage after arena reads the arena through this."""
@@ -755,36 +798,39 @@ class RunFolder(_ArtifactFolder):
         return arena
 
     def write_arena(self, arena: Arena) -> None:
-        self._write("arena.json", arena)
+        self._write("arena", arena)
 
     def track(self) -> Track:
-        rows = pq.read_table(self.path / "track.parquet", schema=TRACK_SCHEMA).to_pylist()
+        path = self.path / self.FILES["track"]
+        rows = pq.read_table(path, schema=TRACK_SCHEMA).to_pylist()
         return Track.model_validate({"frames": rows})
 
     def write_track(self, track: Track) -> None:
         rows = [frame.model_dump() for frame in track.frames]
-        pq.write_table(pa.Table.from_pylist(rows, schema=TRACK_SCHEMA), self.path / "track.parquet")
+        table = pa.Table.from_pylist(rows, schema=TRACK_SCHEMA)
+        self._replace("track", lambda tmp: pq.write_table(table, tmp))
 
     def metrics(self) -> Metrics:
-        return self._read("metrics.json", Metrics)
+        return self._read("metrics", Metrics)
 
     def write_metrics(self, metrics: Metrics) -> None:
-        self._write("metrics.json", metrics)
+        self._write("metrics", metrics)
 
     def events(self) -> Events:
-        rows = pq.read_table(self.path / "events.parquet", schema=EVENTS_SCHEMA).to_pylist()
+        path = self.path / self.FILES["events"]
+        rows = pq.read_table(path, schema=EVENTS_SCHEMA).to_pylist()
         return Events.model_validate({"events": rows})
 
     def write_events(self, events: Events) -> None:
         rows = [event.model_dump() for event in events.events]
         table = pa.Table.from_pylist(rows, schema=EVENTS_SCHEMA)
-        pq.write_table(table, self.path / "events.parquet")
+        self._replace("events", lambda tmp: pq.write_table(table, tmp))
 
     def qc(self) -> Qc:
-        return self._read("qc.json", Qc)
+        return self._read("qc", Qc)
 
     def write_qc(self, qc: Qc) -> None:
-        self._write("qc.json", qc)
+        self._write("qc", qc)
 
 
 class StudyNotReadyError(RuntimeError):
@@ -796,17 +842,37 @@ class StudyFolder(_ArtifactFolder):
     """One study's folder: its design (`study.yaml`, written by the scientist), the per-trial
     metrics table and the stats."""
 
+    FILES: ClassVar[Mapping[str, str]] = {
+        "design": "study.yaml",
+        "trials": "trials.json",
+        "stats": "stats.json",
+    }
+
+    @property
+    def study_id(self) -> str:
+        return self.path.name
+
+    def read(self, name: StudyArtifactName) -> Artifact:
+        """Any artifact by its name."""
+        readers: dict[StudyArtifactName, Callable[[], Artifact]] = {
+            "design": self.design,
+            "trials": self.trials,
+            "stats": self.stats,
+        }
+        return readers[name]()
+
     def design(self) -> StudyDesign:
-        return StudyDesign.model_validate(yaml.safe_load((self.path / "study.yaml").read_text()))
+        text = (self.path / self.FILES["design"]).read_text()
+        return StudyDesign.model_validate(yaml.safe_load(text))
 
     def trials(self) -> TrialTable:
-        return self._read("trials.json", TrialTable)
+        return self._read("trials", TrialTable)
 
     def write_trials(self, table: TrialTable) -> None:
-        self._write("trials.json", table)
+        self._write("trials", table)
 
     def stats(self) -> StudyStats:
-        return self._read("stats.json", StudyStats)
+        return self._read("stats", StudyStats)
 
     def write_stats(self, stats: StudyStats) -> None:
-        self._write("stats.json", stats)
+        self._write("stats", stats)

@@ -37,7 +37,10 @@ CREATE TABLE IF NOT EXISTS stages_done (
 
 
 class Job(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    """The background execution of a run's stages (up to the arena gate, then after it) or of
+    a study's report. One row per run or study: a run's two jobs share it."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     kind: JobKind
     id: str
@@ -48,8 +51,8 @@ class Job(BaseModel):
     updated_at: datetime
 
 
-class StageDone(BaseModel):
-    model_config = ConfigDict(frozen=True)
+class FinishedStage(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     seq: int
     """Increasing across every job, so a stream can resume after the last one it sent."""
@@ -135,7 +138,7 @@ class JobStore:
             ).fetchall()
         return [_job(row) for row in rows]
 
-    def stages(self, kind: JobKind, id: str, after: int = 0) -> list[StageDone]:
+    def stages(self, kind: JobKind, id: str, after: int = 0) -> list[FinishedStage]:
         """The stages the job finished, in order, from after `seq` `after`."""
         with self._connect() as db:
             rows = db.execute(
@@ -143,7 +146,7 @@ class JobStore:
                 "WHERE kind = ? AND id = ? AND seq > ? ORDER BY seq",
                 (kind, id, after),
             ).fetchall()
-        return [StageDone(seq=seq, stage=stage, at=at) for seq, stage, at in rows]
+        return [FinishedStage(seq=seq, stage=stage, at=at) for seq, stage, at in rows]
 
     def fail_interrupted(self, reason: str) -> None:
         """Fail every queued or running job: the jobs run in the API's process, so after a

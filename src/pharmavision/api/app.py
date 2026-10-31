@@ -7,9 +7,9 @@ import asyncio
 import logging
 import re
 import shutil
-from collections.abc import AsyncIterator, Callable, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated
 
 from fastapi import (
     BackgroundTasks,
@@ -19,17 +19,19 @@ from fastapi import (
     Form,
     Header,
     HTTPException,
+    Request,
     UploadFile,
 )
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..artifacts import Artifact, RunFolder, StudyFolder
+from ..artifacts import RunArtifactName, RunFolder, StudyArtifactName, StudyFolder
 from ..judge import Judge
 from ..pipeline import (
     START_STAGES,
     Stage,
+    StageDone,
     confirm_arena,
     finish_run,
     new_run_id,
@@ -42,47 +44,39 @@ from .jobs import RESTING, JobKind, JobStatus, JobStore
 
 log = logging.getLogger(__name__)
 
-RUN_STAGES: tuple[str, ...] = (*START_STAGES, *Stage)
-"""Every run-level stage, in pipeline order."""
+STAGE_ARTIFACTS: dict[str, RunArtifactName] = {
+    "ingest": "manifest",
+    "arena": "arena",
+    Stage.TRACK: "track",
+    Stage.MEASURE: "metrics",
+    Stage.BEHAVIOURS: "events",
+    Stage.QC: "qc",
+}
+"""Every run-level stage in pipeline order, and the artifact it writes last."""
 
 STUDY_STAGES: tuple[str, ...] = ("stats",)
 """The stages a study's report job runs. The report agent (T8b) joins them as "report"."""
 
-RunArtifact = Literal["manifest", "arena", "track", "metrics", "events", "qc"]
-_RUN_FILES: dict[str, str] = {
-    "manifest": "manifest.json",
-    "arena": "arena.json",
-    "track": "track.parquet",
-    "metrics": "metrics.json",
-    "events": "events.parquet",
-    "qc": "qc.json",
-    "video": "video.mp4",
-}
-"""What each artifact is stored as in a run folder."""
-_STAGE_ARTIFACTS: tuple[str, ...] = ("manifest", "arena", "track", "metrics", "events", "qc")
-"""The artifact each of `RUN_STAGES` writes last, in the same order."""
-
-StudyArtifact = Literal["design", "trials", "stats"]
-_STUDY_FILES: dict[str, str] = {
-    "design": "study.yaml",
-    "trials": "trials.json",
-    "stats": "stats.json",
-}
-
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}")
 """A run or study id: a folder name that can't climb out of its parent."""
 
+_FORM_OVERHEAD_BYTES = 64 * 1024
+"""Room for the multipart boundaries and the template field beside the video."""
+
 
 class ApiSettings(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     runs_dir: Path = Path("runs")
-    """Live runs, one folder each, beside `runs/model_cache` as the command line keeps them."""
+    """Live runs, one folder each, beside `runs/model_cache` as the command line keeps them.
+    Uploads wait in `runs/.uploads/` until ingest has read them."""
     studies_dir: Path = Path("studies")
     """One folder per study, holding its `study.yaml`."""
     database: Path = Path("runs/jobs.sqlite3")
+    """The background jobs' status, which outlives the process; the artifacts stay in the
+    run and study folders."""
     precomputed_runs_dir: Path | None = None
-    """Finished run folders served read-only, for the demo."""
+    """Run folders served read-only, for the demo."""
     max_upload_bytes: int = Field(default=1 << 30, gt=0)
     """The SAM 3.1 Files API takes up to 1 GiB per video."""
     stream_poll_s: float = Field(default=0.5, gt=0)
@@ -122,12 +116,25 @@ def create_app(
     templates: Mapping[str, TestTemplate],
 ) -> FastAPI:
     """The API over the given model backends. Jobs left queued or running by an earlier
-    process are marked failed: nothing is running them now."""
+    process are marked failed: nothing is running them now. Run it in one process only."""
     store = JobStore(settings.database)
     store.fail_interrupted("interrupted: the API restarted while this job ran")
     settings.runs_dir.mkdir(parents=True, exist_ok=True)
     uploads = settings.runs_dir / ".uploads"
+    too_large = f"videos up to {settings.max_upload_bytes} bytes"
     app = FastAPI(title="PharmaVision")
+
+    @app.middleware("http")
+    async def refuse_large_uploads(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        """Before the body is read: the form parser spools all of it to disk first. A body
+        sent without a length is caught as it is copied instead."""
+        length = request.headers.get("content-length", "")
+        limit = settings.max_upload_bytes + _FORM_OVERHEAD_BYTES
+        if request.method == "POST" and length.isdigit() and int(length) > limit:
+            return JSONResponse({"detail": too_large}, status_code=413)
+        return await call_next(request)
 
     def find(run_id: str) -> tuple[RunFolder, bool]:
         """The run's folder, and whether it is precomputed (read-only). 404 for no such run."""
@@ -136,20 +143,18 @@ def create_app(
                 return RunFolder(settings.runs_dir / run_id), False
             if settings.precomputed_runs_dir is not None:
                 run = RunFolder(settings.precomputed_runs_dir / run_id)
-                if (run.path / "manifest.json").is_file():
+                if run.has("manifest"):
                     return run, True
         raise HTTPException(404, f"no run {run_id}")
 
     def progress(run_id: str, after: int = 0) -> tuple[RunView, list[tuple[int, str]]]:
         """The run's view, and each stage it finished after event `after`, with its event id.
-        A precomputed run's stages are the artifacts in its folder, numbered in order."""
+        The stages are the whole run's, from ingest on, not only the latest job's. A
+        precomputed run's are the artifacts in its folder, numbered in order."""
         run, read_only = find(run_id)
         if read_only:
             done = _stages_in(run)
-            complete = len(done) == len(RUN_STAGES)
-            status: JobStatus = "done" if complete else "failed"
-            stage = None
-            error = None if complete else f"the precomputed run stops after {done[-1]}"
+            status, stage, error = _precomputed_status(run, done)
             events = list(enumerate(done, start=1))
         else:
             job = store.get("run", run_id)
@@ -163,7 +168,7 @@ def create_app(
             error=error,
             read_only=read_only,
             stages_done=[stage for _, stage in events],
-            artifacts=_artifact_urls(run),
+            artifacts=_artifact_urls(f"/runs/{run_id}", run),
         )
         return view, [(seq, stage) for seq, stage in events if seq > after]
 
@@ -187,30 +192,27 @@ def create_app(
         return views
 
     @app.post("/runs", status_code=202)
-    async def create_run(
+    def create_run(
         background: BackgroundTasks,
         video: Annotated[UploadFile, File()],
         template: Annotated[str, Form()],
     ) -> RunView:
         """Upload a video and choose its test template. Ingest and arena detection run in the
-        background, up to the arena gate."""
+        background, up to the arena gate. A failed run is not retried: processing the video
+        again is a new run."""
         if template not in templates:
             raise HTTPException(422, f"no template {template!r}; choose from {sorted(templates)}")
         run_id = new_run_id()
         upload = uploads / run_id / _filename(video.filename)
         upload.parent.mkdir(parents=True)
-        size = 0
-        with upload.open("wb") as out:
-            while chunk := await video.read(1 << 20):
-                size += len(chunk)
-                if size > settings.max_upload_bytes:
-                    out.close()
-                    shutil.rmtree(upload.parent)
-                    raise HTTPException(413, f"videos up to {settings.max_upload_bytes} bytes")
-                out.write(chunk)
+        try:
+            _copy(video, upload, settings.max_upload_bytes)
+        except BaseException:
+            shutil.rmtree(upload.parent, ignore_errors=True)
+            raise
         store.start("run", run_id)
 
-        def work(done: Callable[[str], None]) -> JobStatus:
+        def work(done: StageDone) -> JobStatus:
             try:
                 start_run(
                     upload,
@@ -241,7 +243,7 @@ def create_app(
         if not store.claim("run", run_id, expected="awaiting zone confirmation"):
             raise HTTPException(409, f"run {run_id} is {view(run_id).status}, not at the gate")
 
-        def work(done: Callable[[str], None]) -> JobStatus:
+        def work(done: StageDone) -> JobStatus:
             confirm_arena(run)
             finish_run(run, segmenter, judge, on_stage_done=done)
             return "done"
@@ -261,7 +263,7 @@ def create_app(
         after = int(last_event_id) if last_event_id and last_event_id.isdigit() else 0
         while True:
             # The status is read before the stages, so a resting job's stages are all there.
-            current, stages = progress(run_id, after)
+            current, stages = await asyncio.to_thread(progress, run_id, after)
             for seq, stage in stages:
                 yield ServerSentEvent(id=str(seq), event="stage", data={"stage": stage})
                 after = seq
@@ -274,25 +276,24 @@ def create_app(
             await asyncio.sleep(settings.stream_poll_s)
 
     @app.get("/runs/{run_id}/artifacts/{name}", response_model=None)
-    def get_artifact(run_id: str, name: RunArtifact) -> Response:
+    def get_artifact(run_id: str, name: RunArtifactName) -> Response:
         """One artifact as JSON, validated against its type as it is read."""
         run, _ = find(run_id)
-        if not (run.path / _RUN_FILES[name]).is_file():
+        if not run.has(name):
             raise HTTPException(404, f"run {run_id} has no {name} yet")
-        artifact: Artifact = getattr(run, name)()
-        return Response(artifact.model_dump_json(), media_type="application/json")
+        return _json(run.read(name).model_dump_json())
 
     @app.get("/runs/{run_id}/video", response_model=None)
     def get_video(run_id: str) -> FileResponse:
         """The normalised video the stages saw, so overlays line up frame for frame."""
         run, _ = find(run_id)
-        if not run.video_path.is_file():
+        if not run.has("video"):
             raise HTTPException(404, f"run {run_id} has no video yet")
         return FileResponse(run.video_path, media_type="video/mp4")
 
     def study_folder(study_id: str) -> StudyFolder:
         study = StudyFolder(settings.studies_dir / study_id)
-        if not _ID.fullmatch(study_id) or not (study.path / "study.yaml").is_file():
+        if not _ID.fullmatch(study_id) or not study.has("design"):
             raise HTTPException(404, f"no study {study_id}")
         return study
 
@@ -305,22 +306,19 @@ def create_app(
             stage=job and job.stage,
             error=job and job.error,
             stages_done=[s.stage for s in store.stages("study", study_id)],
-            artifacts={
-                name: f"/studies/{study_id}/artifacts/{name}"
-                for name, file in _STUDY_FILES.items()
-                if (study.path / file).is_file()
-            },
+            artifacts=_artifact_urls(f"/studies/{study_id}", study),
         )
 
     @app.post("/studies/{study_id}/report", status_code=202)
     def generate_report(study_id: str, background: BackgroundTasks) -> StudyView:
-        """Generate the study's report in the background, from its `study.yaml` and its runs'
-        artifacts. Refused (409) while a report for it is queued or running."""
+        """Generate the study's report in the background, from its `study.yaml` and its runs
+        in the runs folder (not the precomputed one). Refused (409) while a report for it is
+        queued or running."""
         study = study_folder(study_id)
         if not store.start("study", study_id):
             raise HTTPException(409, f"a report for study {study_id} is already running")
 
-        def work(done: Callable[[str], None]) -> JobStatus:
+        def work(done: StageDone) -> JobStatus:
             study_stats(study, settings.runs_dir)
             done("stats")
             return "done"
@@ -333,12 +331,12 @@ def create_app(
         return study_view(study_id)
 
     @app.get("/studies/{study_id}/artifacts/{name}", response_model=None)
-    def get_study_artifact(study_id: str, name: StudyArtifact) -> Response:
+    def get_study_artifact(study_id: str, name: StudyArtifactName) -> Response:
+        """One artifact as JSON, validated against its type as it is read."""
         study = study_folder(study_id)
-        if not (study.path / _STUDY_FILES[name]).is_file():
+        if not study.has(name):
             raise HTTPException(404, f"study {study_id} has no {name} yet")
-        artifact: Artifact = getattr(study, name)()
-        return Response(artifact.model_dump_json(), media_type="application/json")
+        return _json(study.read(name).model_dump_json())
 
     return app
 
@@ -348,7 +346,7 @@ def _run_job(
     kind: JobKind,
     id: str,
     stages: Sequence[str],
-    work: Callable[[Callable[[str], None]], JobStatus],
+    work: Callable[[StageDone], JobStatus],
 ) -> None:
     """Run `work` as the job's body: it hears each stage as it finishes and returns the status
     the job rests in. Any error fails the job, at the stage that raised it, with its message."""
@@ -372,23 +370,48 @@ def _run_job(
 def _stages_in(run: RunFolder) -> list[str]:
     """The stages whose artifacts are in the folder, up to the first one missing."""
     done: list[str] = []
-    for stage, name in zip(RUN_STAGES, _STAGE_ARTIFACTS, strict=True):
-        if not (run.path / _RUN_FILES[name]).is_file():
+    for stage, artifact in STAGE_ARTIFACTS.items():
+        if not run.has(artifact):
             break
         done.append(stage)
     return done
 
 
-def _artifact_urls(run: RunFolder) -> dict[str, str]:
-    base = f"/runs/{run.run_id}"
+def _precomputed_status(
+    run: RunFolder, done: list[str]
+) -> tuple[JobStatus, str | None, str | None]:
+    """Status, stage and error, read from the artifacts of a run nothing is running."""
+    if len(done) == len(STAGE_ARTIFACTS):
+        return "done", None, None
+    if done[-1] == "arena" and not run.arena().confirmed:
+        return "awaiting zone confirmation", None, None
+    return "failed", None, f"the precomputed run stops after {done[-1]}"
+
+
+def _artifact_urls(base: str, folder: RunFolder | StudyFolder) -> dict[str, str]:
     return {
         name: f"{base}/video" if name == "video" else f"{base}/artifacts/{name}"
-        for name, file in _RUN_FILES.items()
-        if (run.path / file).is_file()
+        for name in folder.FILES
+        if folder.has(name)
     }
+
+
+def _copy(upload: UploadFile, dest: Path, max_bytes: int) -> None:
+    """Copy the upload to `dest`, refusing (413) one larger than `max_bytes`."""
+    size = 0
+    with dest.open("wb") as out:
+        while chunk := upload.file.read(1 << 20):
+            size += len(chunk)
+            if size > max_bytes:
+                raise HTTPException(413, f"videos up to {max_bytes} bytes")
+            out.write(chunk)
 
 
 def _filename(name: str | None) -> str:
     """The upload's own name, without any folders, which the manifest records."""
     base = Path(name or "").name
     return base if base not in ("", ".", "..") else "video"
+
+
+def _json(text: str) -> Response:
+    return Response(text, media_type="application/json")

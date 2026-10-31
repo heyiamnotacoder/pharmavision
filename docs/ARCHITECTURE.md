@@ -370,10 +370,18 @@ the demo and write-up, the same way PaedScale published its validation table.
   - **Jobs:** FastAPI background tasks in the API's process, status in SQLite
     (`runs/jobs.sqlite3`): `queued`, `running`, `awaiting zone confirmation`, `done` or
     `failed` with the error message (a too-short video, a floor never found). One process
-    only: on start-up, jobs a previous process left queued or running are marked failed.
-  - **Precomputed runs** (`--precomputed DIR`, finished run folders) are listed and served
-    beside the live ones with `read_only: true`, their stages read from the artifacts present;
-    confirming one is refused, and nothing calls a model.
+    only: on start-up, jobs a previous process left queued or running are marked failed. A
+    failed run is not retried; processing the video again is a new run.
+  - **Uploads** wait in `runs/.uploads/<run_id>/` until ingest has read them, then are
+    deleted. A body over `max_upload_bytes` (1 GiB, the Files API limit) is refused (413) on
+    its `Content-Length`, before it is spooled.
+  - **The stream covers the run, not one job:** after the confirm, a stream opened without
+    `Last-Event-ID` replays `ingest` and `arena` before the new stages.
+  - **Precomputed runs** (`--precomputed DIR`) are listed and served beside the live ones
+    with `read_only: true`. Their stages and status are read from the artifacts present (a
+    folder stopped at the gate reads as `awaiting zone confirmation`). Confirming one is
+    refused, and nothing calls a model. A study report reads its runs from `runs_dir` only,
+    so a demo study over precomputed runs needs them there (T13).
 - **Frontend:** video player with a canvas overlay (masks, trajectory, zones), a zone editor, an
   event timeline, a metrics table and the rendered report. This screen is the demo.
 - **Deploy:** API on Render or Modal (CPU). SAM on Modal GPU if self-hosted. Static frontend.

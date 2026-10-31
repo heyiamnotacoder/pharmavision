@@ -8,6 +8,10 @@ Scoring rodent behaviour tests from overhead video, from the recorded test to a 
 One processing of one video through the pipeline. Processing the same video again is a new run.
 _Avoid_: Job, analysis, session
 
+**Job**:
+The API working on a run or a study in the background: a run's stages up to the arena gate, then the stages after it, or a study's report. Its status (queued, running, awaiting zone confirmation, done, failed) is kept in SQLite. A run is what is processed; a job is the processing in progress, so a run is never called a job.
+_Avoid_: Task, worker
+
 **Trial**:
 One animal tested once in one behaviour test. The trial is the unit that enters the statistics; in the open field MVP, one video holds exactly one trial.
 _Avoid_: Run, video, subject, session

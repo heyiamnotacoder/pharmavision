@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from pharmavision.api import ApiSettings, create_app
 from pharmavision.api.jobs import JobStore
 from pharmavision.judge import Clip, ClipJudgement, FlaggedWindow, Judge, WindowVerdict
+from pharmavision.pipeline import start_run
 from pharmavision.segmenter import FrameMasks, Mask, Segmenter
 from pharmavision.segmenter.synthetic import SyntheticSegmenter
 
@@ -27,12 +28,14 @@ def api(
     segmenter: Segmenter = SCENE,
     judge: Judge | None = None,
     precomputed: Path | None = None,
+    max_upload_bytes: int = 1 << 30,
 ) -> TestClient:
     settings = ApiSettings(
         runs_dir=tmp_path / "runs",
         studies_dir=tmp_path / "studies",
         database=tmp_path / "jobs.sqlite3",
         precomputed_runs_dir=precomputed,
+        max_upload_bytes=max_upload_bytes,
     )
     app = create_app(settings, segmenter, judge or ScriptedJudge(), {"open_field": TEMPLATE})
     return TestClient(app)
@@ -229,6 +232,42 @@ def test_an_unknown_run_is_not_found(run_id: str, tmp_path: Path) -> None:
 
     for path in ("", "/stream", "/video", "/artifacts/manifest"):
         assert client.get(f"/runs/{run_id}{path}").status_code == 404
+
+
+def test_a_precomputed_run_stopped_at_the_gate_reads_as_waiting_there(
+    tmp_path: Path, video: Path
+) -> None:
+    precomputed = tmp_path / "precomputed"
+    precomputed.mkdir()
+    run = start_run(video, TEMPLATE, SCENE, precomputed)
+    client = api(tmp_path, Untouchable(), Untouchable(), precomputed)
+
+    view = client.get(f"/runs/{run.run_id}").json()
+
+    assert (view["status"], view["read_only"]) == ("awaiting zone confirmation", True)
+    assert view["stages_done"] == ["ingest", "arena"]
+    assert client.post(f"/runs/{run.run_id}/arena/confirm").status_code == 409
+
+
+@pytest.mark.parametrize(
+    "limit",
+    [
+        pytest.param(50_000, id="by its declared length, before the body is read"),
+        pytest.param(150_000, id="while it is copied"),  # within the multipart overhead
+    ],
+)
+def test_a_video_over_the_upload_limit_is_refused_before_any_run_exists(
+    limit: int, tmp_path: Path
+) -> None:
+    client = api(tmp_path, max_upload_bytes=limit)
+
+    response = client.post(
+        "/runs", files={"video": ("big.mp4", bytes(200_000))}, data={"template": "open_field"}
+    )
+
+    assert response.status_code == 413
+    assert client.get("/runs").json() == []
+    assert [p for p in (tmp_path / "runs").rglob("*") if p.is_file()] == []
 
 
 def test_a_restart_fails_the_jobs_it_interrupted(tmp_path: Path) -> None:
