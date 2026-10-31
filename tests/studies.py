@@ -10,6 +10,7 @@ import yaml
 
 from pharmavision.artifacts import (
     ArenaSettings,
+    Events,
     Exclusion,
     IngestSettings,
     Manifest,
@@ -41,7 +42,8 @@ def fixture_run(
     exclusions: Sequence[Exclusion] = (),
     measure: MeasureSettings | None = None,
 ) -> RunFolder:
-    """A run folder as the QC stage leaves it, holding `metrics` and `exclusions`."""
+    """A run folder as the QC stage leaves it, holding `metrics`, no behaviour events and
+    `exclusions`."""
     run = RunFolder(runs_dir / run_id)
     run.path.mkdir()
     run.write_manifest(
@@ -62,6 +64,7 @@ def fixture_run(
         )
     )  # fmt: skip
     run.write_metrics(metrics)
+    run.write_events(Events(events=[]))
     run.write_qc(Qc(flags=[], exclusions=list(exclusions)))
     return run
 

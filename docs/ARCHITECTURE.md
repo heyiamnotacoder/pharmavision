@@ -42,6 +42,8 @@ studies/<study>/
   study.yaml         # the design, written by the scientist: groups in order (the first is the reference), and per trial its run id, blinding code and group
   trials.json        # per-trial metrics table: values, group, blinding code and every QC exclusion; excluded trials stay in it
   stats.json         # per metric: n per group after exclusions, the checks, the test and why, statistic, df, p, effect size + CI, post-hoc pairs
+  report.json        # every draft of the report agent with its number audit, and the report as shipped
+  report.md          # the report as shipped: ARRIVE 2.0 Essential 10 methods and results
 ```
 
 All artifacts are Pydantic models serialised to JSON or Parquet. The type is the stage contract.
@@ -176,9 +178,10 @@ purity.
 
       def classify_clip(self, clip: Clip) -> ClipJudgement: ...  # label, confidence, rationale
       def review_window(self, window: FlaggedWindow) -> WindowVerdict: ...  # verdict, reason
+      def write_report(self, brief: ReportBrief) -> str: ...  # Markdown, one heading per section
   ```
 
-  The QC review joined it in T6b (stage 6); the report agent joins it in T9.
+  The QC review joined it in T6b (stage 6); the report agent in T8b (stage 8).
 - `MuseSparkJudge` (`judge/muse_spark.py`): `muse-spark-1.3` on the Responses API, streamed,
   `input_video` as a base64 MP4 with `fps: 15`, structured output
   `{label: rearing | none, confidence, rationale}`: binary, as open decision 3 decided. The
@@ -318,6 +321,54 @@ purity.
     as words ("twelve mice") are not found: the agent is to write numbers as digits.
 - Rearing counts: the agent states that the pipeline does not count rears and why (ADR 0003);
   `get_events_summary` gives the number of candidate windows, never a rear count.
+- **Built in T8b** (`stages/report.py`, `arrive.py`, `MuseSparkJudge.write_report`), entered
+  through `pipeline.study_report`, which refuses a study whose stats have not run:
+  - **Tools** take no arguments and return a stored table as JSON, built once per report
+    (`stages/report.py` `TOOLS`): `get_protocol` (design by blinding code, test, arena, video
+    fps, models, the measure and QC thresholds the methods cite), `get_metrics_table`
+    (`trials.json` by blinding code, no run ids), `get_stats` (the rule's thresholds and every
+    metric's result; no version or bootstrap seed), `get_qc` (each trial's flags, reviews and
+    exclusions) and `get_events_summary` (per trial the number of rear candidate windows and
+    each low-confidence event with the model's rationale, the `min_confidence` threshold, and
+    why there is no rear count). They select and rename fields and compute nothing: a test
+    checks that every number they return is a stored field, a stored list's length, or a
+    number in a rule's reason. The audit's known values are these outputs, so a number reaches
+    the report only if a tool gave it to the agent.
+  - **Rule reasons:** a flag's or rule exclusion's reason ("not found on 17% of frames (limit
+    5%)") is written by deterministic code, so its numbers go out as `reason_values` (a percent
+    as a fraction, `audit.rule_reason_values`) and the agent may quote the reason (FR-7). A
+    model's reason or rationale never gets them, and the model's own confidence is not handed
+    out at all (NFR-1).
+  - The stage refuses a study whose trials differ in template, video fps, behaviour settings
+    or models (the stats stage already refuses differing measure or QC settings), since the
+    methods describe one protocol.
+  - **Agent loop:** each Responses request offers the five tools as strict `function` tools;
+    each `function_call` (read from its `response.output_item.done` event) is answered with a
+    `function_call_output` in the next request, until a response writes text. At most
+    `MuseSparkSettings.report_max_turns` (8) requests per draft. Each request is cached under
+    `<model>/report-v1/<hash of the whole request>`; the tools' outputs decide the
+    conversation, so a re-run replays every turn and `RecordedJudge` needs no API.
+  - **ARRIVE shape** (`arrive.py`): the agent writes one `## <heading>` per Essential 10 item.
+    The stage keeps its text under the ten headings only, and writes `[TO FILL: <fact>]` itself
+    for the facts the system cannot know: sample-size reasoning, pre-test criteria,
+    randomisation (the whole section: whatever the agent writes there is dropped), who knew
+    the allocation, strain/sex/age/weight/source, housing and husbandry, drug administration,
+    time and place of testing. An item the agent left out reads `[TO FILL: nothing was written
+    for this item]`. Headings carry no numbers, so the audit reads only the agent's text.
+  - **Gate** (`ReportSettings`, versioned in `report.json`): the assembled draft is audited; on
+    a failure the agent is re-prompted (its draft as an assistant turn, then each unmatched
+    number with its sentence). `max_drafts` is 2: when the second draft fails too, each
+    sentence holding an unmatched number ships as `~~sentence~~ **[failed the number
+    audit]**`, and `Report.struck` lists the numbers. Every draft and its audit stay in
+    `report.json`.
+  - **Live check:** the function-calling event shape and whether Muse Spark accepts a
+    `function_call` item without the reasoning item that preceded it. **Checked live Oct 31**
+    (PR #35): Muse Spark sent `reasoning`, a `message`, then 5 parallel `function_call` items,
+    and accepted them back without the reasoning item; the draft passed the audit first time.
+    Its `message` came in `phase: "commentary"`, so the answer text leaves out every commentary
+    message. About 22k reasoning tokens per draft are the report's main cost. A re-prompt starts
+    a fresh conversation (prompt, rejected draft, failures), so the agent calls the tools again:
+    a few more cached requests per report.
 
 ## Evaluation harness
 
@@ -365,7 +416,7 @@ the demo and write-up, the same way PaedScale published its validation table.
   | `GET /runs/{id}/artifacts/{name}` | `manifest`, `arena`, `track`, `metrics`, `events` or `qc` as JSON, validated on read; `GET /runs/{id}/video` the normalised MP4 |
   | `POST /runs/{id}/arena/confirm` | the gate: 202, then track → QC in the background; 409 unless the run is `awaiting zone confirmation` (T10 adds edited zones) |
   | `GET /runs/{id}/stream` | SSE: one `stage` event per finished stage (its `id` is the resume point for `Last-Event-ID`), then one `status` event once the run rests, and the stream ends |
-  | `POST /studies/{id}/report`, `GET /studies/{id}`, `GET /studies/{id}/artifacts/{name}` | the study's report job over `studies/<id>/study.yaml`: stage 7 (stats) for now; the report agent (T8b) joins the same job |
+  | `POST /studies/{id}/report`, `GET /studies/{id}`, `GET /studies/{id}/artifacts/{name}` | the study's report job over `studies/<id>/study.yaml`: stage 7 (stats), then stage 8 (the report agent), `report` served as an artifact |
 
   - **Jobs:** FastAPI background tasks in the API's process, status in SQLite
     (`runs/jobs.sqlite3`): `queued`, `running`, `awaiting zone confirmation`, `done` or

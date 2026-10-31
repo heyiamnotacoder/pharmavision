@@ -66,7 +66,12 @@ pythonVersion = "3.12"
 typeCheckingMode = "standard"
 # NFR-6: the measure and stats layers are where every number comes from, and the audit is what
 # keeps every other number out, so they are strict.
-strict = ["src/pharmavision/measure", "src/pharmavision/stats", "src/pharmavision/audit"]
+strict = [
+  "src/pharmavision/measure",
+  "src/pharmavision/stats",
+  "src/pharmavision/audit",
+  "src/pharmavision/arrive.py",
+]
 venvPath = "."
 venv = ".venv"
 

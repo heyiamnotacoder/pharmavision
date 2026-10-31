@@ -1,6 +1,8 @@
-"""The single boundary to the "judges" layer: clips in, labels and text out. A judge never
-produces a number the report states; its confidence is its own, recorded as given."""
+"""The single boundary to the "judges" layer: clips and tables in, labels and text out. A judge
+never produces a number the report states unchecked: its confidence is its own, recorded as
+given, and its report prose passes the number audit before it ships."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Protocol
@@ -71,10 +73,64 @@ class FlaggedWindow:
     hands: tuple[HandSighting, ...]
 
 
+@dataclass(frozen=True)
+class ReportTool:
+    """One tool the report agent may call. It takes no arguments and returns a stored table as
+    JSON text: every tool reads, none writes, none computes a number."""
+
+    name: str
+    description: str
+    read: Callable[[], str]
+
+
+@dataclass(frozen=True)
+class ReportSection:
+    """One ARRIVE 2.0 Essential 10 item, under its own heading in the report."""
+
+    heading: str
+    covers: str
+    """What the agent writes under it, from the tools; empty when the tools hold nothing for it
+    and the agent writes nothing there."""
+    to_fill: tuple[str, ...]
+    """Facts the system cannot know: the report stage writes a `[TO FILL]` for each, never the
+    agent."""
+
+
+@dataclass(frozen=True)
+class AuditFailure:
+    """A number in a rejected draft that matches no value the tools returned."""
+
+    number: str
+    sentence: str
+
+
+@dataclass(frozen=True)
+class RejectedDraft:
+    """A draft the number audit failed: the agent's text, and the numbers that failed it."""
+
+    text: str
+    failures: tuple[AuditFailure, ...]
+
+
+@dataclass(frozen=True)
+class ReportBrief:
+    """What the report agent is asked to write, with what, and what it got wrong before."""
+
+    sections: tuple[ReportSection, ...]
+    tools: tuple[ReportTool, ...]
+    rejected: tuple[RejectedDraft, ...] = ()
+    """Earlier drafts of this report the audit failed, oldest first: the re-prompt."""
+
+
 class Judge(Protocol):
     @property
     def model_id(self) -> str:
         """Recorded in the manifest so a run says which model judged it."""
+        ...
+
+    def write_report(self, brief: ReportBrief) -> str:
+        """The report's Markdown, one `## <heading>` per section of `brief`, written from what
+        the brief's tools return. Its numbers are audited after, never trusted."""
         ...
 
     def classify_clip(self, clip: Clip) -> ClipJudgement:
