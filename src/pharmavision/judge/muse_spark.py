@@ -5,20 +5,32 @@ structured output. The clip goes inline as a base64 MP4 sampled at `input_fps`; 
 examples go ahead of a rear clip as earlier turns (a user turn with the example clip, then an
 assistant turn replaying its label). Every response is cached by model id, prompt version and
 the hash of the clip's frames (and of the prompt and examples), so a re-run makes no API call,
-and the recorded Judge replays the same cache with no API at all."""
+and the recorded Judge replays the same cache with no API at all.
+
+The report agent is a loop of requests with function tools instead, each request cached by its
+whole input."""
 
 import base64
 import json
-from collections.abc import Callable, Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ..model_api import OpenAiTransport, Request, ResponsesTransport
 from ..model_cache import Event, ResponseCache, input_hash
-from . import Clip, ClipJudgement, FlaggedWindow, RearLabel, WindowVerdict
+from . import (
+    Clip,
+    ClipJudgement,
+    FlaggedWindow,
+    RearLabel,
+    ReportBrief,
+    ReportSection,
+    ReportTool,
+    WindowVerdict,
+)
 
 MAX_VIDEOS = 5
 """Videos the Model API takes in one request (a 400 above it, checked live Oct 30)."""
@@ -87,6 +99,39 @@ REVIEW_FORMAT = {
 }
 
 
+REPORT_PROMPT_VERSION = "report-v1"
+"""The report agent's request shape, wording and tools: bump it when any of them changes."""
+
+REPORT_PROMPT = """\
+Write the methods and results section of a paper about an open-field study of mice, scored
+automatically from top-view video by PharmaVision: SAM 3.1 tracked each mouse, and
+deterministic Python code measured every metric and chose and ran every statistical test.
+Read the study through the tools. They are your only source of facts: call each one you need.
+
+Write Markdown with these headings, each once, in this order, and under each what it says:
+
+{sections}
+
+Rules:
+- Every number you write must be a value a tool returned in a numeric field, as given or
+  rounded (10.783 as 10.78). Never compute a number: no differences, ratios, percentages,
+  sums or thresholds that no tool returned. Write p = 0.0016, not p < 0.01.
+- Never copy a number out of a text field (a reason or a rationale), and write numbers as
+  digits, never as words.
+- Write nothing that the tools do not hold. For the facts listed as left out, the report adds
+  a placeholder for the scientist to fill: do not write them, and do not guess them.
+- The pipeline makes no rear count, because its rear evidence did not agree with human raters
+  per video. Say so; never count rears.
+- Prose only under the headings: no tables, no numbered lists, no other headings."""
+
+REPORT_REJECTION = """\
+The number audit rejected that report. These numbers match no value the tools returned:
+
+{failures}
+
+Write the whole report again. Use only values the tools returned, or leave the number out."""
+
+
 class JudgeResponseError(RuntimeError):
     """Muse Spark answered with something other than a complete, well-formed answer."""
 
@@ -149,6 +194,9 @@ class MuseSparkSettings(BaseModel):
     """Labelled clips shown ahead of each clip; with the clip judged, at most `MAX_VIDEOS`."""
     split_file: Path = Path("eval/split.json")
     """The fixed train/eval split; every few-shot example must come from its train videos."""
+    report_max_turns: int = Field(default=8, ge=1)
+    """Requests in one report draft: the agent's tool calls, then its text. Each costs input
+    tokens for the whole conversation so far, so a draft that has not finished by then fails."""
 
     @property
     def model(self) -> str:
@@ -193,7 +241,7 @@ class MuseSparkJudge:
             PROMPT_VERSION,
             digest,
             lambda: self._request(_data_url(clip.video.read_bytes())),
-            ClipJudgement,
+            lambda stream: _parse(stream, ClipJudgement),
         )
 
     def review_window(self, window: FlaggedWindow) -> WindowVerdict:
@@ -213,8 +261,47 @@ class MuseSparkJudge:
                 "text": {"format": REVIEW_FORMAT},
             }
 
-        return _parse(
-            self._respond(REVIEW_PROMPT_VERSION, digest, request, WindowVerdict), WindowVerdict
+        stream = self._respond(
+            REVIEW_PROMPT_VERSION, digest, request, lambda s: _parse(s, WindowVerdict)
+        )
+        return _parse(stream, WindowVerdict)
+
+    def write_report(self, brief: ReportBrief) -> str:
+        """The agent loop: each request offers the tools, and each function call's output goes
+        back in the next request, until a response writes text instead of calling a tool. Each
+        request is cached by all of its input, which the tools' outputs decide, so a re-run
+        replays every turn and the recorded Judge needs no API."""
+        tools = {tool.name: tool for tool in brief.tools}
+        offered = [_function(tool) for tool in brief.tools]
+        conversation = _report_conversation(brief)
+        for _ in range(self.settings.report_max_turns):
+            request: Request = {
+                "model": self.settings.model,
+                "input": list(conversation),
+                "tools": offered,
+            }
+            digest = input_hash("report", request)
+            stream = self._respond(REPORT_PROMPT_VERSION, digest, lambda r=request: r, _turn)
+            calls = _function_calls(stream)
+            if not calls:
+                return _completed_text(stream)
+            for call in calls:
+                tool = tools.get(call.name)
+                output = tool.read() if tool else json.dumps({"error": f"no tool {call.name!r}"})
+                conversation.append(
+                    {
+                        "type": "function_call",
+                        "call_id": call.call_id,
+                        "name": call.name,
+                        "arguments": call.arguments,
+                    }
+                )
+                conversation.append(
+                    {"type": "function_call_output", "call_id": call.call_id, "output": output}
+                )
+        raise JudgeResponseError(
+            f"no report after {self.settings.report_max_turns} requests: the agent kept "
+            "calling tools"
         )
 
     def _respond(
@@ -222,16 +309,17 @@ class MuseSparkJudge:
         prompt_version: str,
         digest: str,
         request: Callable[[], Request],
-        answer: type[BaseModel],
+        check: Callable[[list[Event]], object],
     ) -> list[Event]:
-        """The raw event stream: from the cache, or else from one API call, cached once it
-        parses as an `answer`. `request` is built only on a miss."""
+        """The raw event stream: from the cache, or else from one API call, cached once `check`
+        accepts it (it raises JudgeResponseError otherwise). `request` is built only on a
+        miss."""
         model = self.settings.model
         cached = self.cache.get(model, prompt_version, digest)
         if cached is not None:
             return cached
         stream = list(self.transport.stream(request()))
-        _parse(stream, answer)
+        check(stream)
         self.cache.put(model, prompt_version, digest, stream)
         return stream
 
@@ -307,15 +395,93 @@ def _review_prompt(window: FlaggedWindow) -> str:
     )
 
 
-def _parse[A: BaseModel](stream: Iterable[Event], answer: type[A]) -> A:
-    """The `answer` in a completed stream's output text."""
+@dataclass(frozen=True)
+class _FunctionCall:
+    call_id: str
+    name: str
+    arguments: str
+
+
+_NO_ARGUMENTS = {"type": "object", "properties": {}, "required": [], "additionalProperties": False}
+
+
+def _function(tool: ReportTool) -> dict[str, Any]:
+    return {
+        "type": "function",
+        "name": tool.name,
+        "description": tool.description,
+        "parameters": _NO_ARGUMENTS,
+        "strict": True,
+    }
+
+
+def _report_conversation(brief: ReportBrief) -> list[dict[str, Any]]:
+    """The prompt, then each rejected draft as the agent's turn and the audit's failures as the
+    reply to it: the re-prompt."""
+    sections = "\n\n".join(_section(section) for section in brief.sections)
+    conversation = [_message("user", REPORT_PROMPT.format(sections=sections))]
+    for draft in brief.rejected:
+        failures = "\n".join(f"- {f.number!r} in: {f.sentence!r}" for f in draft.failures)
+        conversation.append(_message("assistant", draft.text))
+        conversation.append(_message("user", REPORT_REJECTION.format(failures=failures)))
+    return conversation
+
+
+def _section(section: ReportSection) -> str:
+    lines = [f"## {section.heading}"]
+    if section.covers:
+        lines.append(f"Write: {section.covers}.")
+    else:
+        lines.append("Write nothing here: the tools hold nothing on it.")
+    if section.to_fill:
+        lines.append(f"Left out: {'; '.join(section.to_fill)}.")
+    return "\n".join(lines)
+
+
+def _message(role: Literal["user", "assistant"], text: str) -> dict[str, Any]:
+    kind = "input_text" if role == "user" else "output_text"
+    return {"type": "message", "role": role, "content": [{"type": kind, "text": text}]}
+
+
+def _function_calls(stream: Iterable[Event]) -> list[_FunctionCall]:
+    """The function calls in a stream, in order, from its finished output items."""
+    calls: list[_FunctionCall] = []
+    for event in stream:
+        item = event.get("item")
+        if event.get("type") != "response.output_item.done" or not isinstance(item, Mapping):
+            continue
+        fields = cast(Mapping[str, object], item)
+        if fields.get("type") == "function_call":
+            calls.append(
+                _FunctionCall(
+                    call_id=str(fields["call_id"]),
+                    name=str(fields["name"]),
+                    arguments=str(fields.get("arguments") or "{}"),
+                )
+            )
+    return calls
+
+
+def _turn(stream: list[Event]) -> None:
+    """A report turn is complete and either calls a tool or writes text."""
+    if not _function_calls(stream) and not _completed_text(stream).strip():
+        raise JudgeResponseError("Muse Spark neither called a tool nor wrote the report")
+
+
+def _completed_text(stream: Iterable[Event]) -> str:
+    """A completed stream's output text."""
     stream = list(stream)
     kinds = {event.get("type") for event in stream}
     if "response.completed" not in kinds:
         raise JudgeResponseError(f"incomplete Muse Spark response: {sorted(map(str, kinds))}")
-    text = "".join(
+    return "".join(
         str(event["delta"]) for event in stream if event.get("type") == "response.output_text.delta"
     )
+
+
+def _parse[A: BaseModel](stream: Iterable[Event], answer: type[A]) -> A:
+    """The `answer` in a completed stream's output text."""
+    text = _completed_text(stream)
     try:
         return answer.model_validate_json(text)
     except ValidationError as error:

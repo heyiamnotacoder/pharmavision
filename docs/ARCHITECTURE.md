@@ -42,6 +42,8 @@ studies/<study>/
   study.yaml         # the design, written by the scientist: groups in order (the first is the reference), and per trial its run id, blinding code and group
   trials.json        # per-trial metrics table: values, group, blinding code and every QC exclusion; excluded trials stay in it
   stats.json         # per metric: n per group after exclusions, the checks, the test and why, statistic, df, p, effect size + CI, post-hoc pairs
+  report.json        # every draft of the report agent with its number audit, and the report as shipped
+  report.md          # the report as shipped: ARRIVE 2.0 Essential 10 methods and results
 ```
 
 All artifacts are Pydantic models serialised to JSON or Parquet. The type is the stage contract.
@@ -176,9 +178,10 @@ purity.
 
       def classify_clip(self, clip: Clip) -> ClipJudgement: ...  # label, confidence, rationale
       def review_window(self, window: FlaggedWindow) -> WindowVerdict: ...  # verdict, reason
+      def write_report(self, brief: ReportBrief) -> str: ...  # Markdown, one heading per section
   ```
 
-  The QC review joined it in T6b (stage 6); the report agent joins it in T9.
+  The QC review joined it in T6b (stage 6); the report agent in T8b (stage 8).
 - `MuseSparkJudge` (`judge/muse_spark.py`): `muse-spark-1.3` on the Responses API, streamed,
   `input_video` as a base64 MP4 with `fps: 15`, structured output
   `{label: rearing | none, confidence, rationale}`: binary, as open decision 3 decided. The
@@ -318,6 +321,41 @@ purity.
     as words ("twelve mice") are not found: the agent is to write numbers as digits.
 - Rearing counts: the agent states that the pipeline does not count rears and why (ADR 0003);
   `get_events_summary` gives the number of candidate windows, never a rear count.
+- **Built in T8b** (`stages/report.py`, `arrive.py`, `MuseSparkJudge.write_report`), entered
+  through `pipeline.study_report`, which refuses a study whose stats have not run:
+  - **Tools** take no arguments and return a stored table as JSON, built once per report:
+    `get_protocol` (design by blinding code, test, arena, video fps, models, the measure, QC
+    and stats thresholds the methods cite), `get_metrics_table` (`trials.json` without run
+    ids), `get_stats` (`stats.json`), `get_qc` (each trial's `qc.json`) and
+    `get_events_summary` (per trial the number of rear candidate windows and each
+    low-confidence event, plus why there is no rear count). They select and rename fields and
+    compute nothing: a test checks that every number they return is a stored field or a stored
+    list's length. The audit's known values are these outputs, so a number reaches the report
+    only if a tool gave it to the agent.
+  - **Agent loop:** each Responses request offers the five tools as strict `function` tools;
+    each `function_call` (read from its `response.output_item.done` event) is answered with a
+    `function_call_output` in the next request, until a response writes text. At most
+    `MuseSparkSettings.report_max_turns` (8) requests per draft. Each request is cached under
+    `<model>/report-v1/<hash of the whole request>`; the tools' outputs decide the
+    conversation, so a re-run replays every turn and `RecordedJudge` needs no API.
+  - **ARRIVE shape** (`arrive.py`): the agent writes one `## <heading>` per Essential 10 item.
+    The stage keeps its text under the ten headings only, and writes `[TO FILL: <fact>]` itself
+    for the facts the system cannot know: sample-size reasoning, pre-test criteria,
+    randomisation (the whole section: whatever the agent writes there is dropped), who knew
+    the allocation, strain/sex/age/weight/source, housing and husbandry, drug administration,
+    time and place of testing. An item the agent left out reads `[TO FILL: nothing was written
+    for this item]`. Headings carry no numbers, so the audit reads only the agent's text.
+  - **Gate** (`ReportSettings`, versioned in `report.json`): the assembled draft is audited; on
+    a failure the agent is re-prompted (its draft as an assistant turn, then each unmatched
+    number with its sentence). `max_drafts` is 2: when the second draft fails too, each
+    sentence holding an unmatched number ships as `~~sentence~~ **[failed the number
+    audit]**`, and `Report.struck` lists the numbers. Every draft and its audit stay in
+    `report.json`.
+  - **Not yet checked live:** the function-calling event shape and whether Muse Spark accepts a
+    `function_call` item without the reasoning item that preceded it. Run one study report on
+    the laptop before relying on it. Numbers that live only inside QC reason strings (a
+    tracking-loss flag's "17% of frames") still fail the audit if the agent copies them; the
+    prompt forbids copying numbers from text fields.
 
 ## Evaluation harness
 

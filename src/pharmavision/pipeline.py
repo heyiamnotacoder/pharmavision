@@ -1,6 +1,6 @@
 """The pipeline entry: the one test seam. A run goes ingest → arena, stops at the arena gate,
 and continues with track → measure → behaviours → QC once a human confirms the zones. At study
-level, the stats run over a study's design and its finished runs."""
+level, the stats run over a study's design and its finished runs, then the report over both."""
 
 import shutil
 import uuid
@@ -19,6 +19,8 @@ from .artifacts import (
     MeasureSettings,
     Metrics,
     QcSettings,
+    Report,
+    ReportSettings,
     RunFolder,
     StatsSettings,
     StudyFolder,
@@ -27,7 +29,7 @@ from .artifacts import (
 )
 from .judge import Judge
 from .segmenter import Segmenter
-from .stages import arena, behaviours, ingest, measure, qc, stats, track
+from .stages import arena, behaviours, ingest, measure, qc, report, stats, track
 from .stages.arena import ArenaNotFoundError
 from .stages.ingest import VideoTooShortError
 from .templates import TestTemplate
@@ -44,6 +46,7 @@ __all__ = [
     "finish_run",
     "run_stage",
     "start_run",
+    "study_report",
     "study_stats",
 ]
 
@@ -140,6 +143,15 @@ def study_stats(
     per-trial metrics table and the stats written to the study folder. Raises
     StudyNotReadyError, writing nothing, while any of its runs has not finished QC."""
     return stats.run(study, runs_dir, settings or StatsSettings())
+
+
+def study_report(
+    study: StudyFolder, runs_dir: Path, judge: Judge, settings: ReportSettings | None = None
+) -> Report:
+    """The study's methods and results, written by the judge from the stored tables and gated
+    by the number audit; `report.json` and `report.md` written to the study folder. Raises
+    StudyNotReadyError, writing nothing, until the study stats have run."""
+    return report.run(study, runs_dir, judge, settings or ReportSettings())
 
 
 def _record_model(run: RunFolder, stage: str, model_id: str) -> None:

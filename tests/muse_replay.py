@@ -22,6 +22,46 @@ def verdict(verdict: str, reason: str) -> list[Event]:
     return responses_events([json.dumps({"verdict": verdict, "reason": reason})])
 
 
+def text(markdown: str) -> list[Event]:
+    """A completed stream whose output text is `markdown`, in one delta: an agent's last turn."""
+    return responses_events([markdown])
+
+
+def tool_calls(*names: str) -> list[Event]:
+    """A completed stream that calls each tool in `names` with no arguments, as `function_call`
+    output items (`call-0`, `call-1`, ...), and writes no text."""
+    items = [
+        {
+            "id": f"fc_{n}",
+            "type": "function_call",
+            "call_id": f"call-{n}",
+            "name": name,
+            "arguments": "{}",
+            "status": "completed",
+        }
+        for n, name in enumerate(names)
+    ]
+    envelope = responses_events([""])
+    created, completed = envelope[0], envelope[-1]
+    events: list[Event] = [created]
+    for n, item in enumerate(items):
+        events.append({"type": "response.output_item.added", "output_index": n, "item": item})
+        events.append({"type": "response.output_item.done", "output_index": n, "item": item})
+    events.append({**completed, "response": {**completed["response"], "output": items}})
+    for n, event in enumerate(events):
+        event["sequence_number"] = n
+    return events
+
+
+def function_outputs(request: Mapping[str, Any]) -> dict[str, str]:
+    """Each `function_call_output` in a Responses request's input, by its call id."""
+    return {
+        item["call_id"]: item["output"]
+        for item in request["input"]
+        if item.get("type") == "function_call_output"
+    }
+
+
 def videos_sent(request: Mapping[str, Any]) -> Iterator[Mapping[str, Any]]:
     """Every `input_video` part in a Responses request, in order."""
     for message in request["input"]:

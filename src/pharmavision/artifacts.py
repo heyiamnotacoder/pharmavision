@@ -713,6 +713,48 @@ class NumberAudit(Artifact):
         return not self.unmatched
 
 
+class ReportSettings(Artifact):
+    """How the report stage gates the agent's drafts."""
+
+    version: int = 1
+    """Bump when a default, a section or a tool's output changes."""
+    max_drafts: int = Field(default=2, ge=1)
+    """Drafts the audit sees: the first, then one re-prompt with its failing numbers. When the
+    last fails too, the report ships with its failing sentences struck out and flagged."""
+    audit: AuditSettings = AuditSettings()
+
+
+class ReportDraft(Artifact):
+    """One draft of the report: the agent's text, the report assembled from it, and its audit."""
+
+    text: str
+    """The agent's Markdown as written."""
+    markdown: str
+    """The report: the agent's text under each section's heading, with the stage's `[TO FILL]`
+    placeholders. This is what the audit read."""
+    audit: NumberAudit
+
+
+class Report(Artifact):
+    """`report.json`: every draft and its audit, and the report as shipped (`report.md`)."""
+
+    settings: ReportSettings
+    model_id: str
+    drafts: list[ReportDraft] = Field(min_length=1)
+    markdown: str
+    """The last draft's report; when its audit failed, with each failing sentence struck out
+    and flagged."""
+
+    @property
+    def passed(self) -> bool:
+        return self.drafts[-1].audit.passed
+
+    @property
+    def struck(self) -> list[AuditedNumber]:
+        """The numbers whose sentences were struck out: none when the last draft passed."""
+        return self.drafts[-1].audit.unmatched
+
+
 @dataclass(frozen=True)
 class _ArtifactFolder:
     """A folder of JSON artifacts; every read validates against the artifact's type."""
@@ -794,7 +836,7 @@ class StudyNotReadyError(RuntimeError):
 @dataclass(frozen=True)
 class StudyFolder(_ArtifactFolder):
     """One study's folder: its design (`study.yaml`, written by the scientist), the per-trial
-    metrics table and the stats."""
+    metrics table, the stats and the report."""
 
     def design(self) -> StudyDesign:
         return StudyDesign.model_validate(yaml.safe_load((self.path / "study.yaml").read_text()))
@@ -810,3 +852,10 @@ class StudyFolder(_ArtifactFolder):
 
     def write_stats(self, stats: StudyStats) -> None:
         self._write("stats.json", stats)
+
+    def report(self) -> Report:
+        return self._read("report.json", Report)
+
+    def write_report(self, report: Report) -> None:
+        self._write("report.json", report)
+        (self.path / "report.md").write_text(report.markdown)
