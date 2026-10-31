@@ -934,3 +934,9 @@ class StudyFolder(_ArtifactFolder):
         """`report.json` with every draft, then `report.md`, the report as shipped."""
         self._write("report", report)
         self._replace_file(REPORT_MARKDOWN, lambda tmp: tmp.write_text(report.markdown))
+
+    def remove_report(self) -> None:
+        """Remove `report.md`, then `report.json`: a report quotes the stats it was written
+        from, so new stats leave none behind."""
+        (self.path / REPORT_MARKDOWN).unlink(missing_ok=True)
+        (self.path / self.FILES["report"]).unlink(missing_ok=True)

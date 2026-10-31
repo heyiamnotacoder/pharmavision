@@ -40,10 +40,21 @@ def with_commentary(stream: list[Event], commentary: str) -> list[Event]:
         "delta": commentary,
     }
     done = {"type": "response.output_item.done", "output_index": 0, "item": item}
-    events = [stream[0], added, delta, done, *stream[1:]]
+    events = [stream[0], added, delta, done, *(_after(item, e) for e in stream[1:])]
     for n, event in enumerate(events):
         event["sequence_number"] = n
     return events
+
+
+def _after(commentary: Event, event: Event) -> Event:
+    """A copy of `event` with its output item one place later, behind `commentary`."""
+    event = {**event}
+    if "output_index" in event:
+        event["output_index"] += 1
+    if event.get("type") == "response.completed":
+        response = event["response"]
+        event["response"] = {**response, "output": [commentary, *response["output"]]}
+    return event
 
 
 def tool_calls(*names: str) -> list[Event]:

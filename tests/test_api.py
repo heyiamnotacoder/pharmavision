@@ -18,6 +18,7 @@ from pharmavision.judge import (
     ReportBrief,
     WindowVerdict,
 )
+from pharmavision.judge.muse_spark import JudgeResponseError
 from pharmavision.pipeline import start_run
 from pharmavision.segmenter import FrameMasks, Mask, Segmenter
 from pharmavision.segmenter.synthetic import SyntheticSegmenter
@@ -301,7 +302,8 @@ def fixture_study(tmp_path: Path) -> Path:
 
 def test_a_study_report_job_writes_the_stats_then_the_report(tmp_path: Path) -> None:
     study = fixture_study(tmp_path)
-    client = api(tmp_path, judge=ScriptedJudge(drafts=["## Results\n\nNo trial was excluded."]))
+    draft = "## Results\n\nNo trial was excluded, so each group had 3 trials."
+    client = api(tmp_path, judge=ScriptedJudge(drafts=[draft]))
 
     response = client.post(f"/studies/{study.name}/report")
 
@@ -311,7 +313,9 @@ def test_a_study_report_job_writes_the_stats_then_the_report(tmp_path: Path) -> 
     assert view["stages_done"] == ["stats", "report"]
     assert set(view["artifacts"]) == {"design", "trials", "stats", "report"}
     report = client.get(view["artifacts"]["report"]).json()
-    assert "No trial was excluded." in report["markdown"]
+    (audit,) = [d["audit"] for d in report["drafts"]]
+    assert [(n["text"], n["source"] is not None) for n in audit["numbers"]] == [("3", True)]
+    assert "each group had 3 trials." in report["markdown"]
     assert "[TO FILL: housing and husbandry]" in report["markdown"]
     stats = client.get(view["artifacts"]["stats"]).json()
     distance = next(m for m in stats["metrics"] if m["metric"] == "distance_travelled_cm")
@@ -334,6 +338,30 @@ def test_a_study_with_an_unfinished_run_fails_its_report_with_the_reason(
     assert (view["status"], view["stage"]) == ("failed", "stats")
     assert "drug-1" in view["error"]
     assert set(view["artifacts"]) == {"design"}
+
+
+class GivesUpAfterItsDrafts(ScriptedJudge):
+    """Writes each scripted draft, then fails as the agent does at its turn limit."""
+
+    def write_report(self, brief: ReportBrief) -> str:
+        if not self.drafts:
+            raise JudgeResponseError("no report after 8 requests: the agent kept calling tools")
+        return super().write_report(brief)
+
+
+def test_a_failed_report_leaves_the_new_stats_without_the_old_report(tmp_path: Path) -> None:
+    study = fixture_study(tmp_path)
+    client = api(tmp_path, judge=GivesUpAfterItsDrafts(drafts=["## Results\n\nNo exclusions."]))
+    client.post(f"/studies/{study.name}/report")
+
+    client.post(f"/studies/{study.name}/report")
+
+    view = client.get(f"/studies/{study.name}").json()
+    assert (view["status"], view["stage"]) == ("failed", "report")
+    assert "kept calling tools" in view["error"]
+    assert view["stages_done"] == ["stats"]
+    assert set(view["artifacts"]) == {"design", "trials", "stats"}
+    assert not (study / "report.md").exists()
 
 
 def test_a_study_without_a_design_is_not_found(tmp_path: Path) -> None:
