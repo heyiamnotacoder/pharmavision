@@ -356,9 +356,24 @@ the demo and write-up, the same way PaedScale published its validation table.
 
 ## Application layer
 
-- **Backend:** FastAPI. `POST /runs` (upload video + template), `POST /runs/{id}/arena/confirm`,
-  `GET /runs/{id}` (status + artifacts), `GET /runs/{id}/stream` (SSE progress),
-  `POST /studies/{id}/report`. Long stages run as background jobs with status in SQLite.
+- **Backend:** FastAPI (`api/`, T9a), served by `python -m pharmavision serve`.
+
+  | Endpoint | Does |
+  |---|---|
+  | `POST /runs` | upload a video (multipart `video`) and a `template` name; 202, then ingest + arena run in the background |
+  | `GET /runs`, `GET /runs/{id}` | status, the stage running (or the one that failed), the error, `stages_done`, and a URL per artifact present |
+  | `GET /runs/{id}/artifacts/{name}` | `manifest`, `arena`, `track`, `metrics`, `events` or `qc` as JSON, validated on read; `GET /runs/{id}/video` the normalised MP4 |
+  | `POST /runs/{id}/arena/confirm` | the gate: 202, then track → QC in the background; 409 unless the run is `awaiting zone confirmation` (T10 adds edited zones) |
+  | `GET /runs/{id}/stream` | SSE: one `stage` event per finished stage (its `id` is the resume point for `Last-Event-ID`), then one `status` event once the run rests, and the stream ends |
+  | `POST /studies/{id}/report`, `GET /studies/{id}`, `GET /studies/{id}/artifacts/{name}` | the study's report job over `studies/<id>/study.yaml`: stage 7 (stats) for now; the report agent (T8b) joins the same job |
+
+  - **Jobs:** FastAPI background tasks in the API's process, status in SQLite
+    (`runs/jobs.sqlite3`): `queued`, `running`, `awaiting zone confirmation`, `done` or
+    `failed` with the error message (a too-short video, a floor never found). One process
+    only: on start-up, jobs a previous process left queued or running are marked failed.
+  - **Precomputed runs** (`--precomputed DIR`, finished run folders) are listed and served
+    beside the live ones with `read_only: true`, their stages read from the artifacts present;
+    confirming one is refused, and nothing calls a model.
 - **Frontend:** video player with a canvas overlay (masks, trajectory, zones), a zone editor, an
   event timeline, a metrics table and the rendered report. This screen is the demo.
 - **Deploy:** API on Render or Modal (CPU). SAM on Modal GPU if self-hosted. Static frontend.
