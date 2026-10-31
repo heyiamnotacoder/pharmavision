@@ -166,8 +166,9 @@ def study_stats(
     study: StudyFolder, runs_dir: Path, settings: StatsSettings | None = None
 ) -> StudyStats:
     """The study-level stats: every trial in `study.yaml` read from its run in `runs_dir`, the
-    per-trial metrics table and the stats written to the study folder. Raises
-    StudyNotReadyError, writing nothing, while any of its runs has not finished QC."""
+    per-trial metrics table and the stats written to the study folder, and any report on
+    earlier stats removed. Raises StudyNotReadyError, writing nothing, while any of its runs
+    has not finished QC."""
     return stats.run(study, runs_dir, settings or StatsSettings())
 
 

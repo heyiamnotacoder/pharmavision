@@ -448,10 +448,9 @@ def _function_calls(stream: Iterable[Event]) -> list[_FunctionCall]:
     """The function calls in a stream, in order, from its finished output items."""
     calls: list[_FunctionCall] = []
     for event in stream:
-        item = event.get("item")
-        if event.get("type") != "response.output_item.done" or not isinstance(item, Mapping):
+        fields = _item(event)
+        if event.get("type") != "response.output_item.done" or fields is None:
             continue
-        fields = cast(Mapping[str, object], item)
         if fields.get("type") == "function_call":
             calls.append(
                 _FunctionCall(
@@ -477,10 +476,9 @@ def _completed_text(stream: Iterable[Event]) -> str:
     if "response.completed" not in kinds:
         raise JudgeResponseError(f"incomplete Muse Spark response: {sorted(map(str, kinds))}")
     commentary = {
-        str(fields.get("id"))
+        fields.get("id")
         for event in stream
-        if isinstance(item := event.get("item"), Mapping)
-        and (fields := cast(Mapping[str, object], item)).get("phase") == "commentary"
+        if (fields := _item(event)) is not None and fields.get("phase") == "commentary"
     }
     return "".join(
         str(event["delta"])
@@ -488,6 +486,12 @@ def _completed_text(stream: Iterable[Event]) -> str:
         if event.get("type") == "response.output_text.delta"
         and event.get("item_id") not in commentary
     )
+
+
+def _item(event: Event) -> Mapping[str, object] | None:
+    """The output item an event carries, if any."""
+    item = event.get("item")
+    return cast(Mapping[str, object], item) if isinstance(item, Mapping) else None
 
 
 def _parse[A: BaseModel](stream: Iterable[Event], answer: type[A]) -> A:

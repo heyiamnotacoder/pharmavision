@@ -313,8 +313,8 @@ def create_app(
     @app.post("/studies/{study_id}/report", status_code=202)
     def generate_report(study_id: str, background: BackgroundTasks) -> StudyView:
         """Generate the study's report in the background, from its `study.yaml` and its runs
-        in the runs folder (not the precomputed one). Refused (409) while a report for it is
-        queued or running."""
+        in the runs folder (not the precomputed one): the stats, then the report agent. Refused
+        (409) while a report for it is queued or running."""
         study = study_folder(study_id)
         if not store.start("study", study_id):
             raise HTTPException(409, f"a report for study {study_id} is already running")

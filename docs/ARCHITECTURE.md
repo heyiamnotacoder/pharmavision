@@ -322,7 +322,9 @@ purity.
 - Rearing counts: the agent states that the pipeline does not count rears and why (ADR 0003);
   `get_events_summary` gives the number of candidate windows, never a rear count.
 - **Built in T8b** (`stages/report.py`, `arrive.py`, `MuseSparkJudge.write_report`), entered
-  through `pipeline.study_report`, which refuses a study whose stats have not run:
+  through `pipeline.study_report`, which refuses a study whose stats have not run. A report
+  quotes the stats it was written from, so the stats stage removes `report.json` and
+  `report.md` before it writes new stats: a report that then fails leaves no stale one on show.
   - **Tools** take no arguments and return a stored table as JSON, built once per report
     (`stages/report.py` `TOOLS`): `get_protocol` (design by blinding code, test, arena, video
     fps, models, the measure and QC thresholds the methods cite), `get_metrics_table`
@@ -365,8 +367,10 @@ purity.
     `function_call` item without the reasoning item that preceded it. **Checked live Oct 31**
     (PR #35): Muse Spark sent `reasoning`, a `message`, then 5 parallel `function_call` items,
     and accepted them back without the reasoning item; the draft passed the audit first time.
-    Its `message` came in `phase: "commentary"`, so the answer text leaves out every commentary
-    message. About 22k reasoning tokens per draft are the report's main cost. A re-prompt starts
+    Its `message` came in `phase: "commentary"` beside the tool calls, where a turn's text is
+    not read anyway; the answer text leaves out every commentary message in case one comes
+    beside a final draft too (not seen yet). About 22k reasoning tokens per draft are the
+    report's main cost. A re-prompt starts
     a fresh conversation (prompt, rejected draft, failures), so the agent calls the tools again:
     a few more cached requests per report.
 
@@ -623,3 +627,4 @@ the demo and write-up, the same way PaedScale published its validation table.
 | Sturman open-field videos: 928×576, 25 fps, about 609 s (15,234 frames), wide-angle lens, burned-in timestamp. (Checked Oct 30.) | `ffprobe` on the downloaded files |
 | Muse Spark video tokens, measured: a 2–4 s 928×576 clip costs about 731 input tokens at the default sampling and 5,170 with `fps: 15`. Not found online: a video duration limit. | `spike.muse_clips`, Oct 30 |
 | Muse Spark takes at most 5 videos in one request (a 400 above it); assistant turns replaying earlier output work as few-shot turns. A repeated few-shot prefix is not cached (`cached_tokens` 0). A cropped 256 px, 2–4 s clip at `fps: 15` is about 2,300 input tokens, plus about 1,500 output tokens, mostly reasoning. | Live requests, `spike.muse_few_shot`, Oct 30 |
+| Muse Spark function calling: strict `function` tools with no arguments are called in parallel (5 `function_call` items, `arguments` `"{}"`, read from `response.output_item.done`), and are accepted back without their reasoning item. A turn may carry a `message` in `phase: "commentary"`. One report draft took 2 requests: 1,532 in / 237 out, then 6,077 in / 23,189 out (22,439 reasoning), about 93 s, roughly $0.11 at standard prices. | Live study report, PR #35, Oct 31 |
