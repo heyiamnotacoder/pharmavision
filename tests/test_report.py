@@ -295,3 +295,18 @@ def test_a_commentary_message_beside_the_draft_is_not_part_of_the_report(
 
     assert report.drafts[0].text == HONEST
     assert "assemble" not in report.markdown
+
+
+def test_a_commentary_message_beside_the_tool_calls_is_not_part_of_the_report(
+    tmp_path: Path, runs_dir: Path
+) -> None:
+    """The shape seen live on Oct 31: the commentary comes with the tool calls."""
+    study = fixture_study(tmp_path, runs_dir)
+    aside = "I'll assemble your methods and results directly from the PharmaVision output."
+    transport = ReplayTransport([with_commentary(tool_calls(*TOOLS), aside), text(HONEST)])
+    judge = MuseSparkJudge(MuseSparkSettings(cache_dir=tmp_path / "cache"), transport)
+
+    report = study_report(study, runs_dir, judge)
+
+    assert report.drafts[0].text == HONEST
+    assert sorted(function_outputs(transport.requests[1])) == [f"call-{n}" for n in range(5)]
