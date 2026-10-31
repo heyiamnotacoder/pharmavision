@@ -323,15 +323,25 @@ purity.
   `get_events_summary` gives the number of candidate windows, never a rear count.
 - **Built in T8b** (`stages/report.py`, `arrive.py`, `MuseSparkJudge.write_report`), entered
   through `pipeline.study_report`, which refuses a study whose stats have not run:
-  - **Tools** take no arguments and return a stored table as JSON, built once per report:
-    `get_protocol` (design by blinding code, test, arena, video fps, models, the measure, QC
-    and stats thresholds the methods cite), `get_metrics_table` (`trials.json` without run
-    ids), `get_stats` (`stats.json`), `get_qc` (each trial's `qc.json`) and
-    `get_events_summary` (per trial the number of rear candidate windows and each
-    low-confidence event, plus why there is no rear count). They select and rename fields and
-    compute nothing: a test checks that every number they return is a stored field or a stored
-    list's length. The audit's known values are these outputs, so a number reaches the report
-    only if a tool gave it to the agent.
+  - **Tools** take no arguments and return a stored table as JSON, built once per report
+    (`stages/report.py` `TOOLS`): `get_protocol` (design by blinding code, test, arena, video
+    fps, models, the measure and QC thresholds the methods cite), `get_metrics_table`
+    (`trials.json` by blinding code, no run ids), `get_stats` (the rule's thresholds and every
+    metric's result; no version or bootstrap seed), `get_qc` (each trial's flags, reviews and
+    exclusions) and `get_events_summary` (per trial the number of rear candidate windows and
+    each low-confidence event with the model's rationale, the `min_confidence` threshold, and
+    why there is no rear count). They select and rename fields and compute nothing: a test
+    checks that every number they return is a stored field, a stored list's length, or a
+    number in a rule's reason. The audit's known values are these outputs, so a number reaches
+    the report only if a tool gave it to the agent.
+  - **Rule reasons:** a flag's or rule exclusion's reason ("not found on 17% of frames (limit
+    5%)") is written by deterministic code, so its numbers go out as `reason_values` (a percent
+    as a fraction, `audit.rule_reason_values`) and the agent may quote the reason (FR-7). A
+    model's reason or rationale never gets them, and the model's own confidence is not handed
+    out at all (NFR-1).
+  - The stage refuses a study whose trials differ in template, video fps, behaviour settings
+    or models (the stats stage already refuses differing measure or QC settings), since the
+    methods describe one protocol.
   - **Agent loop:** each Responses request offers the five tools as strict `function` tools;
     each `function_call` (read from its `response.output_item.done` event) is answered with a
     `function_call_output` in the next request, until a response writes text. At most
@@ -353,9 +363,9 @@ purity.
     `report.json`.
   - **Not yet checked live:** the function-calling event shape and whether Muse Spark accepts a
     `function_call` item without the reasoning item that preceded it. Run one study report on
-    the laptop before relying on it. Numbers that live only inside QC reason strings (a
-    tracking-loss flag's "17% of frames") still fail the audit if the agent copies them; the
-    prompt forbids copying numbers from text fields.
+    the laptop before relying on it. A re-prompt starts a fresh conversation (prompt, rejected
+    draft, failures), so the agent calls the tools again: a few more cached requests per
+    report.
 
 ## Evaluation harness
 

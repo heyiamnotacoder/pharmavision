@@ -116,8 +116,8 @@ Rules:
 - Every number you write must be a value a tool returned in a numeric field, as given or
   rounded (10.783 as 10.78). Never compute a number: no differences, ratios, percentages,
   sums or thresholds that no tool returned. Write p = 0.0016, not p < 0.01.
-- Never copy a number out of a text field (a reason or a rationale), and write numbers as
-  digits, never as words.
+- Never copy a number out of a text field (a reason or a rationale) unless the same object's
+  `reason_values` field holds it. Write numbers as digits, never as words.
 - Write nothing that the tools do not hold. For the facts listed as left out, the report adds
   a placeholder for the scientist to fill: do not write them, and do not guess them.
 - The pipeline makes no rear count, because its rear evidence did not agree with human raters
@@ -129,7 +129,8 @@ The number audit rejected that report. These numbers match no value the tools re
 
 {failures}
 
-Write the whole report again. Use only values the tools returned, or leave the number out."""
+Write the whole report again. Call the tools again for any value you need: use only values
+they return, or leave the number out."""
 
 
 class JudgeResponseError(RuntimeError):
@@ -272,7 +273,7 @@ class MuseSparkJudge:
         request is cached by all of its input, which the tools' outputs decide, so a re-run
         replays every turn and the recorded Judge needs no API."""
         tools = {tool.name: tool for tool in brief.tools}
-        offered = [_function(tool) for tool in brief.tools]
+        offered = [_tool_spec(tool) for tool in brief.tools]
         conversation = _report_conversation(brief)
         for _ in range(self.settings.report_max_turns):
             request: Request = {
@@ -281,7 +282,7 @@ class MuseSparkJudge:
                 "tools": offered,
             }
             digest = input_hash("report", request)
-            stream = self._respond(REPORT_PROMPT_VERSION, digest, lambda r=request: r, _turn)
+            stream = self._respond(REPORT_PROMPT_VERSION, digest, lambda r=request: r, _check_turn)
             calls = _function_calls(stream)
             if not calls:
                 return _completed_text(stream)
@@ -405,7 +406,7 @@ class _FunctionCall:
 _NO_ARGUMENTS = {"type": "object", "properties": {}, "required": [], "additionalProperties": False}
 
 
-def _function(tool: ReportTool) -> dict[str, Any]:
+def _tool_spec(tool: ReportTool) -> dict[str, Any]:
     return {
         "type": "function",
         "name": tool.name,
@@ -462,7 +463,7 @@ def _function_calls(stream: Iterable[Event]) -> list[_FunctionCall]:
     return calls
 
 
-def _turn(stream: list[Event]) -> None:
+def _check_turn(stream: list[Event]) -> None:
     """A report turn is complete and either calls a tool or writes text."""
     if not _function_calls(stream) and not _completed_text(stream).strip():
         raise JudgeResponseError("Muse Spark neither called a tool nor wrote the report")

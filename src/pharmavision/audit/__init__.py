@@ -3,6 +3,6 @@ the prose fails (NFR-1). Deterministic and pure, like stats/: the tool outputs a
 in, the audit out; no I/O, no model calls."""
 
 from .gate import audit_numbers
-from .known import known_values
+from .known import known_values, rule_reason_values
 
-__all__ = ["audit_numbers", "known_values"]
+__all__ = ["audit_numbers", "known_values", "rule_reason_values"]

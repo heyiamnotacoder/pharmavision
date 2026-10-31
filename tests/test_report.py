@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel
 
+from pharmavision.artifacts import BehaviourEvent, Events
 from pharmavision.audit import known_values
 from pharmavision.judge.muse_spark import (
     JudgeResponseError,
@@ -196,6 +197,11 @@ def test_the_tools_read_the_stored_tables_and_compute_no_number(
         excluded=frozenset({"diazepam-0"}),
     )  # fmt: skip
     study_stats(study, runs_dir)
+    unsure = BehaviourEvent(
+        first_frame=25, last_frame=39, label="rearing", confidence=0.42, low_confidence=True,
+        rationale="Unclear.", source="model",
+    )  # fmt: skip
+    RunFolder(runs_dir / "vehicle-0").write_events(Events(events=[unsure]))
     judge = ScriptedJudge(drafts=[HONEST, HONEST])
     study_report(study, runs_dir, judge)
     before = folder_bytes(tmp_path)
@@ -213,7 +219,13 @@ def test_the_tools_read_the_stored_tables_and_compute_no_number(
         stored |= {f"qc{n}": run.qc(), f"events{n}": run.events()}
     stored_values = {k.value for k in known_values(stored)}
     told_values = {k.value for k in known_values(outputs)}
-    assert told_values <= stored_values
+    in_rule_reason = {0.17, 0.05}  # "the animal was not found on 17% of frames (limit 5%)"
+    assert told_values <= stored_values | in_rule_reason
+    assert 0.42 not in told_values  # the model's own confidence is not a measured number
+    [event] = outputs["get_events_summary"]["trials"][0]["low_confidence_events"]
+    assert event == {
+        "first_frame": 25, "last_frame": 39, "label": "rearing", "model_rationale": "Unclear.",
+    }  # fmt: skip
     [excluded] = outputs["get_metrics_table"]["trials"][6]["exclusions"]
     assert excluded["reason"] == "the animal was not found on 17% of frames (limit 5%)"
 
@@ -237,3 +249,35 @@ def test_an_agent_that_keeps_calling_tools_writes_no_report(tmp_path: Path, runs
 
     assert not (study.path / "report.json").exists()
     assert transport.streams == []
+
+
+def test_a_rule_exclusion_can_be_reported_with_the_numbers_in_its_reason(
+    tmp_path: Path, runs_dir: Path
+) -> None:
+    study = write_study(
+        tmp_path, runs_dir, {"vehicle": VEHICLE, "diazepam": DIAZEPAM},
+        excluded=frozenset({"diazepam-0"}),
+    )  # fmt: skip
+    study_stats(study, runs_dir)
+    quoted = "Trial B07 was excluded: the animal was not found on 17% of frames (limit 5%)."
+    draft = HONEST.replace("No trial was excluded.", quoted).replace(RESULTS, "")
+
+    report = study_report(study, runs_dir, ScriptedJudge(drafts=[draft]))
+
+    assert report.passed, [n.text for n in report.struck]
+    assert quoted in report.markdown
+
+
+def test_a_study_whose_runs_were_filmed_differently_gets_no_report(
+    tmp_path: Path, runs_dir: Path
+) -> None:
+    study = fixture_study(tmp_path, runs_dir)
+    odd = RunFolder(runs_dir / "diazepam-2")
+    manifest = odd.manifest()
+    video = manifest.video.model_copy(update={"fps": 25.0})
+    odd.write_manifest(manifest.model_copy(update={"video": video}))
+
+    with pytest.raises(StudyNotReadyError, match="B09"):
+        study_report(study, runs_dir, ScriptedJudge(drafts=[HONEST]))
+
+    assert not (study.path / "report.json").exists()
