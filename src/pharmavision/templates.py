@@ -35,3 +35,7 @@ OPEN_FIELD = TestTemplate(
     centre_area_fraction=0.5,
     protocol_duration_s=600.0,
 )
+
+
+TEMPLATES: dict[str, TestTemplate] = {"open_field": OPEN_FIELD}
+"""The templates a user can choose when creating a run, by name."""

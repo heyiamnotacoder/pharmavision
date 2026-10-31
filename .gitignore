@@ -2,8 +2,10 @@
 # The labels are GPL-3.0 and must never be committed into this MIT repo.
 eval/data/
 
-# Pipeline run artifacts (normalised videos, tracks, model response cache)
+# Pipeline run artifacts (normalised videos, tracks, model response cache, the API's job
+# database) and study folders
 runs/
+studies/
 
 # Secrets
 .env

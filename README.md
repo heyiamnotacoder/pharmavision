@@ -14,6 +14,12 @@ uv sync
 scripts/check.sh
 ```
 
+Serve the API (needs `MODEL_API_KEY` in `.env` for anything not already in `runs/model_cache`):
+
+```bash
+uv run python -m pharmavision serve --precomputed path/to/finished-runs
+```
+
 ## Licence and credits
 
 - Code: MIT (see `LICENSE`).

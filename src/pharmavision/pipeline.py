@@ -4,6 +4,7 @@ level, the stats run over a study's design and its finished runs, then the repor
 
 import shutil
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 from enum import StrEnum
 from importlib.metadata import version
@@ -44,6 +45,7 @@ __all__ = [
     "VideoTooShortError",
     "confirm_arena",
     "finish_run",
+    "new_run_id",
     "run_stage",
     "start_run",
     "study_report",
@@ -60,6 +62,18 @@ class Stage(StrEnum):
     QC = "qc"
 
 
+START_STAGES = ("ingest", "arena")
+"""The stages `start_run` runs, in order, before the arena gate."""
+
+StageDone = Callable[[str], None]
+"""Told each stage's name as it finishes, for progress reporting."""
+
+
+def new_run_id(now: datetime | None = None) -> str:
+    """A fresh run id: the UTC time it was made, then a random suffix."""
+    return f"{now or datetime.now(UTC):%Y%m%dT%H%M%SZ}-{uuid.uuid4().hex[:6]}"
+
+
 def start_run(
     video: Path,
     template: TestTemplate,
@@ -70,13 +84,17 @@ def start_run(
     measure_settings: MeasureSettings | None = None,
     qc_settings: QcSettings | None = None,
     behaviour_settings: BehaviourSettings | None = None,
+    run_id: str | None = None,
+    on_stage_done: StageDone = lambda _: None,
 ) -> RunFolder:
     """Ingest the video into a new run folder and detect the arena, which waits unconfirmed.
-    All or nothing: if the video is too short or no floor is found, no run folder is left."""
+    All or nothing: if the video is too short or no floor is found, no run folder is left.
+    `run_id` names the folder (a fresh `new_run_id()` by default); `on_stage_done` hears
+    "ingest" and then "arena"."""
     ingest_settings = ingest_settings or IngestSettings()
     source = ingest.check_source(video, template)
     created_at = datetime.now(UTC)
-    run = RunFolder(runs_dir / f"{created_at:%Y%m%dT%H%M%SZ}-{uuid.uuid4().hex[:6]}")
+    run = RunFolder(runs_dir / (run_id or new_run_id(created_at)))
     run.path.mkdir()
     try:
         normalised = ingest.normalise(video, run.video_path, ingest_settings)
@@ -95,8 +113,10 @@ def start_run(
                 video=normalised,
             )
         )
+        on_stage_done("ingest")
         run.write_arena(arena.detect(run, segmenter))
         _record_model(run, "arena", segmenter.model_id)
+        on_stage_done("arena")
     except BaseException:
         shutil.rmtree(run.path)
         raise
@@ -110,10 +130,16 @@ def confirm_arena(run: RunFolder) -> Arena:
     return confirmed
 
 
-def finish_run(run: RunFolder, segmenter: Segmenter, judge: Judge) -> Metrics:
-    """Every stage after the arena gate, in order."""
+def finish_run(
+    run: RunFolder,
+    segmenter: Segmenter,
+    judge: Judge,
+    on_stage_done: StageDone = lambda _: None,
+) -> Metrics:
+    """Every stage after the arena gate, in order; `on_stage_done` hears each one's name."""
     for stage in Stage:
         run_stage(run, stage, segmenter, judge)
+        on_stage_done(stage)
     return run.metrics()
 
 
