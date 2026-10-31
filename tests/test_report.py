@@ -26,7 +26,7 @@ from pharmavision.pipeline import (
 )
 
 from .judges import ScriptedJudge
-from .muse_replay import function_outputs, text, tool_calls
+from .muse_replay import function_outputs, text, tool_calls, with_commentary
 from .sam_replay import ReplayTransport
 from .studies import write_study
 
@@ -281,3 +281,17 @@ def test_a_study_whose_runs_were_filmed_differently_gets_no_report(
         study_report(study, runs_dir, ScriptedJudge(drafts=[HONEST]))
 
     assert not (study.path / "report.json").exists()
+
+
+def test_a_commentary_message_beside_the_draft_is_not_part_of_the_report(
+    tmp_path: Path, runs_dir: Path
+) -> None:
+    study = fixture_study(tmp_path, runs_dir)
+    aside = "I'll assemble your methods and results directly from the PharmaVision output."
+    transport = ReplayTransport([with_commentary(text(HONEST), aside)])
+    judge = MuseSparkJudge(MuseSparkSettings(cache_dir=tmp_path / "cache"), transport)
+
+    report = study_report(study, runs_dir, judge)
+
+    assert report.drafts[0].text == HONEST
+    assert "assemble" not in report.markdown

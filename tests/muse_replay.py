@@ -27,6 +27,25 @@ def text(markdown: str) -> list[Event]:
     return responses_events([markdown])
 
 
+def with_commentary(stream: list[Event], commentary: str) -> list[Event]:
+    """`stream` with a `phase: "commentary"` message ahead of its answer, as Muse Spark sends
+    one on the live API (Oct 31): a remark to the user, not part of the answer."""
+    item = {"id": "msg_commentary", "type": "message", "role": "assistant", "phase": "commentary"}
+    added = {"type": "response.output_item.added", "output_index": 0, "item": item}
+    delta = {
+        "type": "response.output_text.delta",
+        "item_id": "msg_commentary",
+        "output_index": 0,
+        "content_index": 0,
+        "delta": commentary,
+    }
+    done = {"type": "response.output_item.done", "output_index": 0, "item": item}
+    events = [stream[0], added, delta, done, *stream[1:]]
+    for n, event in enumerate(events):
+        event["sequence_number"] = n
+    return events
+
+
 def tool_calls(*names: str) -> list[Event]:
     """A completed stream that calls each tool in `names` with no arguments, as `function_call`
     output items (`call-0`, `call-1`, ...), and writes no text."""

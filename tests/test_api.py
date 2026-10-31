@@ -299,16 +299,20 @@ def fixture_study(tmp_path: Path) -> Path:
     return write_study(tmp_path / "studies", tmp_path / "runs", distances).path
 
 
-def test_a_study_report_job_writes_the_study_stats(tmp_path: Path) -> None:
+def test_a_study_report_job_writes_the_stats_then_the_report(tmp_path: Path) -> None:
     study = fixture_study(tmp_path)
-    client = api(tmp_path)
+    client = api(tmp_path, judge=ScriptedJudge(drafts=["## Results\n\nNo trial was excluded."]))
 
     response = client.post(f"/studies/{study.name}/report")
 
     assert response.status_code == 202
     view = client.get(f"/studies/{study.name}").json()
-    assert (view["status"], view["error"], view["stages_done"]) == ("done", None, ["stats"])
-    assert set(view["artifacts"]) == {"design", "trials", "stats"}
+    assert (view["status"], view["error"]) == ("done", None)
+    assert view["stages_done"] == ["stats", "report"]
+    assert set(view["artifacts"]) == {"design", "trials", "stats", "report"}
+    report = client.get(view["artifacts"]["report"]).json()
+    assert "No trial was excluded." in report["markdown"]
+    assert "[TO FILL: housing and husbandry]" in report["markdown"]
     stats = client.get(view["artifacts"]["stats"]).json()
     distance = next(m for m in stats["metrics"] if m["metric"] == "distance_travelled_cm")
     assert [g["n"] for g in distance["groups"]] == [3, 3]

@@ -36,6 +36,7 @@ from ..pipeline import (
     finish_run,
     new_run_id,
     start_run,
+    study_report,
     study_stats,
 )
 from ..segmenter import Segmenter
@@ -54,8 +55,8 @@ STAGE_ARTIFACTS: dict[str, RunArtifactName] = {
 }
 """Every run-level stage in pipeline order, and the artifact it writes last."""
 
-STUDY_STAGES: tuple[str, ...] = ("stats",)
-"""The stages a study's report job runs. The report agent (T8b) joins them as "report"."""
+STUDY_STAGES: tuple[str, ...] = ("stats", "report")
+"""The stages a study's report job runs, in order."""
 
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}")
 """A run or study id: a folder name that can't climb out of its parent."""
@@ -321,6 +322,8 @@ def create_app(
         def work(done: StageDone) -> JobStatus:
             study_stats(study, settings.runs_dir)
             done("stats")
+            study_report(study, settings.runs_dir, judge)
+            done("report")
             return "done"
 
         background.add_task(_run_job, store, "study", study_id, STUDY_STAGES, work)

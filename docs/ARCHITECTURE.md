@@ -361,11 +361,14 @@ purity.
     sentence holding an unmatched number ships as `~~sentence~~ **[failed the number
     audit]**`, and `Report.struck` lists the numbers. Every draft and its audit stay in
     `report.json`.
-  - **Not yet checked live:** the function-calling event shape and whether Muse Spark accepts a
-    `function_call` item without the reasoning item that preceded it. Run one study report on
-    the laptop before relying on it. A re-prompt starts a fresh conversation (prompt, rejected
-    draft, failures), so the agent calls the tools again: a few more cached requests per
-    report.
+  - **Live check:** the function-calling event shape and whether Muse Spark accepts a
+    `function_call` item without the reasoning item that preceded it. **Checked live Oct 31**
+    (PR #35): Muse Spark sent `reasoning`, a `message`, then 5 parallel `function_call` items,
+    and accepted them back without the reasoning item; the draft passed the audit first time.
+    Its `message` came in `phase: "commentary"`, so the answer text leaves out every commentary
+    message. About 22k reasoning tokens per draft are the report's main cost. A re-prompt starts
+    a fresh conversation (prompt, rejected draft, failures), so the agent calls the tools again:
+    a few more cached requests per report.
 
 ## Evaluation harness
 
@@ -413,7 +416,7 @@ the demo and write-up, the same way PaedScale published its validation table.
   | `GET /runs/{id}/artifacts/{name}` | `manifest`, `arena`, `track`, `metrics`, `events` or `qc` as JSON, validated on read; `GET /runs/{id}/video` the normalised MP4 |
   | `POST /runs/{id}/arena/confirm` | the gate: 202, then track → QC in the background; 409 unless the run is `awaiting zone confirmation` (T10 adds edited zones) |
   | `GET /runs/{id}/stream` | SSE: one `stage` event per finished stage (its `id` is the resume point for `Last-Event-ID`), then one `status` event once the run rests, and the stream ends |
-  | `POST /studies/{id}/report`, `GET /studies/{id}`, `GET /studies/{id}/artifacts/{name}` | the study's report job over `studies/<id>/study.yaml`: stage 7 (stats) for now; the report agent (T8b) joins the same job |
+  | `POST /studies/{id}/report`, `GET /studies/{id}`, `GET /studies/{id}/artifacts/{name}` | the study's report job over `studies/<id>/study.yaml`: stage 7 (stats), then stage 8 (the report agent), `report` served as an artifact |
 
   - **Jobs:** FastAPI background tasks in the API's process, status in SQLite
     (`runs/jobs.sqlite3`): `queued`, `running`, `awaiting zone confirmation`, `done` or

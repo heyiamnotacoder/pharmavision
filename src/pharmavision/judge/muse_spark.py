@@ -470,13 +470,23 @@ def _check_turn(stream: list[Event]) -> None:
 
 
 def _completed_text(stream: Iterable[Event]) -> str:
-    """A completed stream's output text."""
+    """A completed stream's output text, without its commentary: Muse Spark may send a message
+    in `phase: "commentary"` (a remark to the user, seen live on Oct 31) beside its answer."""
     stream = list(stream)
     kinds = {event.get("type") for event in stream}
     if "response.completed" not in kinds:
         raise JudgeResponseError(f"incomplete Muse Spark response: {sorted(map(str, kinds))}")
+    commentary = {
+        str(fields.get("id"))
+        for event in stream
+        if isinstance(item := event.get("item"), Mapping)
+        and (fields := cast(Mapping[str, object], item)).get("phase") == "commentary"
+    }
     return "".join(
-        str(event["delta"]) for event in stream if event.get("type") == "response.output_text.delta"
+        str(event["delta"])
+        for event in stream
+        if event.get("type") == "response.output_text.delta"
+        and event.get("item_id") not in commentary
     )
 
 
