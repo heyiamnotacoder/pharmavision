@@ -5,7 +5,9 @@ services:
   - type: web
     name: pharmavision
     runtime: docker
-    plan: starter
+    # Free: the demo only has to last through judging. It sleeps after 15 min idle, so the first
+    # visit after that waits about a minute while it wakes.
+    plan: free
     dockerfilePath: ./Dockerfile
     healthCheckPath: /
     envVars:
