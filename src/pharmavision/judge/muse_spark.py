@@ -29,6 +29,7 @@ from . import (
     ReportBrief,
     ReportSection,
     ReportTool,
+    TrialPhase,
     WindowVerdict,
 )
 
@@ -62,7 +63,7 @@ SCHEMA = {
 }
 FORMAT = {"type": "json_schema", "name": "rear_label", "schema": SCHEMA, "strict": True}
 
-REVIEW_PROMPT_VERSION = "qc-v1"
+REVIEW_PROMPT_VERSION = "qc-v2"
 """The QC review's request shape and wording: bump it when either changes."""
 
 REVIEW_PROMPT = """\
@@ -71,16 +72,24 @@ frames {first_frame}-{last_frame} of the video, which an automatic quality check
 green outline is the mouse's tracked outline.
 
 The check found: {kind}: {reason}.
+These frames lie {phase}.
 A hand detector looked at a few of the flagged frames: {hands}.
 
 Decide what the flagged frames are worth for measuring the mouse's behaviour:
 - keep: the tracking is right and nothing disturbs the mouse (a reflection, a dropping, a brief
   tracking glitch).
 - exclude_window: leave the flagged frames out (a hand in the arena, the outline on something
-  that is not the mouse), and keep the rest of the trial.
-- exclude_trial: the whole trial is unusable (the mouse is handled or lifted out, escapes, or
-  the arena is disturbed).
+  that is not the mouse), and keep the rest of the trial. A hand placing the mouse at the start
+  or lifting it out at the end is expected in every trial: that is this verdict.
+- exclude_trial: the whole trial is unusable (a hand handles the mouse during the test, the
+  mouse escapes, or the arena is disturbed).
 Answer with the verdict and one sentence of reason. Do not state any numbers in the reason."""
+
+PHASES: dict[TrialPhase, str] = {
+    "placement": "at the start of the trial, when the mouse is placed in the arena",
+    "test": "during the test, after the mouse was placed and before it is lifted out",
+    "removal": "at the end of the trial, when the mouse is lifted out of the arena",
+}
 
 REVIEW_SCHEMA = {
     "type": "object",
@@ -392,6 +401,7 @@ def _review_prompt(window: FlaggedWindow) -> str:
         last_frame=window.last_frame,
         kind=window.kind,
         reason=window.reason,
+        phase=PHASES[window.phase],
         hands=hands,
     )
 
