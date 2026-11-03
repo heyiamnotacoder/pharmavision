@@ -25,6 +25,7 @@ from fastapi import (
 )
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.sse import EventSourceResponse, ServerSentEvent
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..artifacts import RunArtifactName, RunFolder, StudyArtifactName, StudyFolder
@@ -394,6 +395,16 @@ def create_app(
         return _json(study.read(name).model_dump_json())
 
     return app
+
+
+def with_frontend(api: FastAPI, dist: Path) -> FastAPI:
+    """The deployed site: the built frontend (`frontend/dist`) at `/` and the API under `/api`,
+    where the frontend's default `VITE_API_BASE` reaches it. Screens are picked by URL hash, so
+    every page is `index.html`."""
+    site = FastAPI(title="PharmaVision", openapi_url=None)
+    site.mount("/api", api)
+    site.mount("/", StaticFiles(directory=dist, html=True))
+    return site
 
 
 def _run_job(

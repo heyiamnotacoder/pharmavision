@@ -1,0 +1,16 @@
+# Secrets and git-ignored data never reach the image: the Sturman labels are GPL-3.0.
+.env
+.env.*
+eval/data/
+runs/
+studies/
+demo/
+*.tar.gz
+
+.git/
+.venv/
+**/__pycache__/
+.pytest_cache/
+.ruff_cache/
+frontend/node_modules/
+frontend/dist/

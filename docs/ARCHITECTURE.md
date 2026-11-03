@@ -563,8 +563,15 @@ report: eval/split.json ✓ → per eval video with a tracked run (eval/data/run
     them, and the viewer says which are missing ("no zones yet", "not tracked yet", "no
     metrics yet") instead of failing. The metric units copy `METRIC_UNITS` by hand until the
     API serves them.
-- **Deploy:** API on Render or Modal (CPU). SAM on Modal GPU if self-hosted. Static frontend.
-  Precomputed demo runs ship with the app so the demo never waits on a cold GPU.
+- **Deploy (T13):** one Docker web service on Render (`Dockerfile`, `render.yaml`), one
+  process. `serve --frontend frontend/dist` mounts the API under `/api`, where the built
+  frontend's default `VITE_API_BASE` reaches it, and serves the frontend at `/`
+  (`api.with_frontend`). SAM 3.1 and Muse Spark stay on the Meta API (`MODEL_API_KEY`, set on
+  the host). Precomputed demo runs and their study ship in the image: `scripts/pack-demo.sh
+  STUDY_ID` packs a finished study and its runs into a tarball, and the build fetches it from
+  `DEMO_URL` into `demo/runs` (`--precomputed`) and `demo/studies` (`--studies-dir`), so the
+  demo never waits on a model. Live runs, their jobs database and the model cache sit in the
+  container's `runs/` and are lost on a redeploy.
 
 ## Cost control
 
