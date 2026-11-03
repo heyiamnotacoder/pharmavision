@@ -310,6 +310,17 @@ def create_app(
             artifacts=_artifact_urls(f"/studies/{study_id}", study),
         )
 
+    @app.get("/studies")
+    def list_studies() -> list[StudyView]:
+        """Every study in the studies folder with a `study.yaml`."""
+        if not settings.studies_dir.is_dir():
+            return []
+        return [
+            study_view(p.name)
+            for p in sorted(settings.studies_dir.iterdir())
+            if _ID.fullmatch(p.name) and StudyFolder(p).has("design")
+        ]
+
     @app.post("/studies/{study_id}/report", status_code=202)
     def generate_report(study_id: str, background: BackgroundTasks) -> StudyView:
         """Generate the study's report in the background, from its `study.yaml` and its runs

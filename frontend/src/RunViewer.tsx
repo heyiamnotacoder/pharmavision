@@ -1,17 +1,21 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import {
   api,
   apiUrl,
   getJson,
   type Arena,
+  type Events,
   type Manifest,
   type Metrics,
+  type Qc,
   type RunView,
   type Track,
 } from "./api";
-import { frameAt } from "./frames";
+import { clock, frameAt, seekTime } from "./frames";
 import { COLOURS, drawPolygon, drawPathTail, maskImage, pathTail, type Position } from "./overlay";
 import { MetricsTable } from "./MetricsTable";
+import { QcList } from "./QcList";
+import { Timeline } from "./Timeline";
 
 /** How much of the path the overlay keeps behind the animal. */
 const TAIL_SECONDS = 10;
@@ -24,6 +28,8 @@ interface RunData {
   arena: Arena | null;
   track: Track | null;
   metrics: Metrics | null;
+  events: Events | null;
+  qc: Qc | null;
 }
 
 class NotIngestedError extends Error {}
@@ -38,19 +44,29 @@ async function loadRun(runId: string): Promise<RunData> {
   if (artifacts.manifest === undefined || artifacts.video === undefined) {
     throw new NotIngestedError(`run ${runId} has not been ingested yet`);
   }
-  const [manifest, arena, track, metrics] = await Promise.all([
+  const [manifest, arena, track, metrics, events, qc] = await Promise.all([
     getJson<Manifest>(artifacts.manifest),
     optional<Arena>(artifacts.arena),
     optional<Track>(artifacts.track),
     optional<Metrics>(artifacts.metrics),
+    optional<Events>(artifacts.events),
+    optional<Qc>(artifacts.qc),
   ]);
-  return { manifest, videoUrl: apiUrl(artifacts.video), arena, track, metrics };
+  return { manifest, videoUrl: apiUrl(artifacts.video), arena, track, metrics, events, qc };
 }
 
 /** Mount with `key={runId}`: its state belongs to one run. */
 export function RunViewer({ runId }: { runId: string }) {
   const [data, setData] = useState<RunData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const fps = data?.manifest.video.fps;
+  const seek = useCallback(
+    (frame: number) => {
+      if (videoRef.current && fps) videoRef.current.currentTime = seekTime(frame, fps);
+    },
+    [fps],
+  );
 
   useEffect(() => {
     let live = true;
@@ -77,18 +93,36 @@ export function RunViewer({ runId }: { runId: string }) {
   return (
     <section className="viewer">
       <h2>Run {runId}</h2>
-      <OverlayPlayer {...data} />
+      <OverlayPlayer {...data} videoRef={videoRef} onSeek={seek} />
       {data.metrics ? (
         <MetricsTable metrics={data.metrics} measureVersion={data.manifest.measure.version} />
       ) : (
         <p className="missing">No metrics yet: the run has not reached the measure stage.</p>
       )}
+      {data.qc ? (
+        <QcList qc={data.qc} fps={data.manifest.video.fps} onSeek={seek} />
+      ) : (
+        <p className="missing">No QC yet: the run has not reached the QC stage.</p>
+      )}
     </section>
   );
 }
 
-function OverlayPlayer({ manifest, videoUrl, arena, track }: Omit<RunData, "metrics">) {
-  const videoRef = useRef<HTMLVideoElement>(null);
+interface PlayerProps extends Omit<RunData, "metrics"> {
+  videoRef: RefObject<HTMLVideoElement | null>;
+  onSeek: (frame: number) => void;
+}
+
+function OverlayPlayer({
+  manifest,
+  videoUrl,
+  arena,
+  track,
+  events,
+  qc,
+  videoRef,
+  onSeek,
+}: PlayerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [frame, setFrame] = useState(0);
   const { width, height, fps, n_frames: nFrames } = manifest.video;
@@ -130,17 +164,17 @@ function OverlayPlayer({ manifest, videoUrl, arena, track }: Omit<RunData, "metr
       draw(meta.mediaTime);
       handle = video.requestVideoFrameCallback(onFrame);
     };
-    const onSeek = () => {
+    const onSeeked = () => {
       draw(video.currentTime);
     };
     draw(video.currentTime);
     handle = video.requestVideoFrameCallback(onFrame);
-    video.addEventListener("seeked", onSeek);
+    video.addEventListener("seeked", onSeeked);
     return () => {
       video.cancelVideoFrameCallback(handle);
-      video.removeEventListener("seeked", onSeek);
+      video.removeEventListener("seeked", onSeeked);
     };
-  }, [arena, track, positions, width, height, fps, nFrames]);
+  }, [videoRef, arena, track, positions, width, height, fps, nFrames]);
 
   const record = track?.frames[frame];
   return (
@@ -151,7 +185,7 @@ function OverlayPlayer({ manifest, videoUrl, arena, track }: Omit<RunData, "metr
       </div>
       <figcaption>
         <span data-testid="frame">
-          Frame {frame + 1} / {nFrames}
+          Frame {frame} of 0–{nFrames - 1} · {clock(frame / fps)}
         </span>
         {track ? (
           record?.detected ? null : (
@@ -184,6 +218,14 @@ function OverlayPlayer({ manifest, videoUrl, arena, track }: Omit<RunData, "metr
           </span>
         </span>
       </figcaption>
+      <Timeline
+        events={events?.events ?? null}
+        exclusions={qc?.exclusions ?? null}
+        nFrames={nFrames}
+        fps={fps}
+        frame={frame}
+        onSeek={onSeek}
+      />
     </figure>
   );
 }

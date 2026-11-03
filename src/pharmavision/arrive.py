@@ -77,7 +77,10 @@ STRUCK_FLAG = "**[failed the number audit]**"
 
 _HEADING = re.compile(r"^[ \t]*#{1,6}[ \t]+(?P<title>.*?)[ \t#]*$", re.MULTILINE)
 _NUMBERING = re.compile(r"^[0-9]+[.)]?\s*")
-_LINE_PREFIX = re.compile(r"[ \t]*(?:#+[ \t]+|[-*+][ \t]+|[0-9]+\.[ \t]+|\|[ \t]*)?")
+_LINE_PREFIX = re.compile(r"[ \t]*(?:#+[ \t]+|>[ \t]*|[-*+][ \t]+|[0-9]+[.)][ \t]+)?")
+_TABLE_ROW = re.compile(r"[ \t]*\|")
+_CELL_BORDER = re.compile(r"(?<!\\)\|")
+"""A table cell's border: a pipe not escaped."""
 
 
 def placeholder(fact: str) -> str:
@@ -101,15 +104,33 @@ def assemble(text: str, sections: Sequence[ReportSection] = SECTIONS) -> str:
 
 def strike(markdown: str, failed: Sequence[AuditedNumber]) -> str:
     """`markdown` with each sentence that holds a failed number struck out and flagged. A
-    heading's, list item's or table row's marker stays outside the strike."""
+    heading's, quote's or list item's marker stays outside the strike, and a table row (one
+    sentence to the audit) is struck cell by cell, so each still parses as what it was."""
     spans = sorted({n.sentence_span for n in failed}, reverse=True)
     for start, end in spans:
         sentence = markdown[start:end]
-        prefix = _LINE_PREFIX.match(sentence)
-        cut = prefix.end() if prefix else 0
-        struck = f"{sentence[:cut]}~~{sentence[cut:]}~~ {STRUCK_FLAG}"
+        if _TABLE_ROW.match(sentence):
+            struck = _strike_row(sentence)
+        else:
+            prefix = _LINE_PREFIX.match(sentence)
+            cut = prefix.end() if prefix else 0
+            struck = f"{sentence[:cut]}~~{sentence[cut:]}~~ {STRUCK_FLAG}"
         markdown = markdown[:start] + struck + markdown[end:]
     return markdown
+
+
+def _strike_row(row: str) -> str:
+    """A table row with each cell's text struck and the flag in its last cell: a strike across
+    the borders would not parse, since GFM splits a row into cells before inline marks."""
+    cells = _CELL_BORDER.split(row)
+    filled = [i for i, cell in enumerate(cells) if i and cell.strip()]
+    for i in filled:
+        cell = cells[i]
+        lead, trail = cell[: len(cell) - len(cell.lstrip())], cell[len(cell.rstrip()) :]
+        text = cell.strip()
+        flag = f" {STRUCK_FLAG}" if i == filled[-1] else ""
+        cells[i] = f"{lead}~~{text}~~{flag}{trail}"
+    return "|".join(cells)
 
 
 def _by_heading(text: str) -> dict[str, str]:

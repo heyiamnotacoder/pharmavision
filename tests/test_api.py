@@ -364,6 +364,21 @@ def test_a_failed_report_leaves_the_new_stats_without_the_old_report(tmp_path: P
     assert not (study / "report.md").exists()
 
 
+def test_the_study_list_holds_each_study_with_a_design(tmp_path: Path) -> None:
+    study = fixture_study(tmp_path)
+    (tmp_path / "studies" / "no-design-yet").mkdir()
+    client = api(tmp_path)
+
+    studies = client.get("/studies").json()
+
+    assert [(s["study_id"], s["status"]) for s in studies] == [(study.name, None)]
+    assert set(studies[0]["artifacts"]) == {"design"}
+
+
+def test_the_study_list_is_empty_without_a_studies_folder(tmp_path: Path) -> None:
+    assert api(tmp_path).get("/studies").json() == []
+
+
 def test_a_study_without_a_design_is_not_found(tmp_path: Path) -> None:
     client = api(tmp_path)
 

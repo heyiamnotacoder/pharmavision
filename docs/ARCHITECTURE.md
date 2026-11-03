@@ -361,8 +361,10 @@ purity.
     a failure the agent is re-prompted (its draft as an assistant turn, then each unmatched
     number with its sentence). `max_drafts` is 2: when the second draft fails too, each
     sentence holding an unmatched number ships as `~~sentence~~ **[failed the number
-    audit]**`, and `Report.struck` lists the numbers. Every draft and its audit stay in
-    `report.json`.
+    audit]**`, and `Report.struck` lists the numbers. A heading's, quote's or list item's
+    marker stays outside the strike; a table row (one sentence to the audit) is struck cell by
+    cell with the flag in its last cell, since GFM splits a row into cells before it reads
+    `~~`. Every draft and its audit stay in `report.json`.
   - **Live check:** the function-calling event shape and whether Muse Spark accepts a
     `function_call` item without the reasoning item that preceded it. **Checked live Oct 31**
     (PR #35): Muse Spark sent `reasoning`, a `message`, then 5 parallel `function_call` items,
@@ -420,6 +422,7 @@ the demo and write-up, the same way PaedScale published its validation table.
   | `GET /runs/{id}/artifacts/{name}` | `manifest`, `arena`, `track`, `metrics`, `events` or `qc` as JSON, validated on read; `GET /runs/{id}/video` the normalised MP4 |
   | `POST /runs/{id}/arena/confirm` | the gate: 202, then track → QC in the background; 409 unless the run is `awaiting zone confirmation` (T10 adds edited zones) |
   | `GET /runs/{id}/stream` | SSE: one `stage` event per finished stage (its `id` is the resume point for `Last-Event-ID`), then one `status` event once the run rests, and the stream ends |
+  | `GET /studies` | every study folder with a `study.yaml`, as `GET /studies/{id}` shows it |
   | `POST /studies/{id}/report`, `GET /studies/{id}`, `GET /studies/{id}/artifacts/{name}` | the study's report job over `studies/<id>/study.yaml`: stage 7 (stats), then stage 8 (the report agent), `report` served as an artifact |
 
   - **Jobs:** FastAPI background tasks in the API's process, status in SQLite
@@ -441,8 +444,21 @@ the demo and write-up, the same way PaedScale published its validation table.
   event timeline, a metrics table and the rendered report. This screen is the demo.
   - `frontend/`: Vite + React + TypeScript (strict), checked by `scripts/check.sh`
     (typecheck, ESLint, Vitest, build). It reads the API at `VITE_API_BASE` (default `/api`,
-    which the dev server proxies to `:8000`). Two screens, by URL hash: the run list and
-    `#/runs/<id>`, the run viewer (T9b).
+    which the dev server proxies to `:8000`). Three screens, by URL hash: the study and run
+    lists, `#/runs/<id>`, the run viewer (T9b, T11), and `#/studies/<id>`, the report (T11).
+  - **Frames are shown by index**, as the artifacts and the report write them (frame 0 is the
+    first), with the time they start at. Seeking to frame i sets the video to the middle of
+    its interval, `(i + 0.5) / fps`, so the player shows frame i and not the one before.
+  - **Timeline (T11):** under the player, one bar per lane over the trial's frames: each
+    behaviour event (green rearing, grey none, hatched when low-confidence), and each QC
+    exclusion (red; a whole-trial exclusion spans the bar, hatched). A click seeks the video to the window's first frame. Below the
+    metrics, the QC list has every exclusion in `qc.json` with its frames, reason and
+    whether a rule or the model decided it; its frames seek too.
+  - **Report view (T11):** `report.json`'s shipped Markdown, rendered by `react-markdown` with
+    GFM (model-written text: no raw HTML is rendered). A remark plugin marks each
+    `[TO FILL: …]` (`mark.to-fill`, dashed amber), each struck sentence (`del.struck`, red)
+    and its `[failed the number audit]` flag, so neither reads as audited prose. A line above
+    says how the last draft's audit went and how many items are left to fill.
   - **Overlay sync:** the canvas has the normalised video's pixel size, so artifact pixels are
     canvas pixels. Each frame is drawn inside `requestVideoFrameCallback`, keyed by the frame
     index of the presented frame (`floor(mediaTime × fps)`), and again on `seeked`. Checked on

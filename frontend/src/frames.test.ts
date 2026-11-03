@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { frameAt } from "./frames";
+import { clock, frameAt, frameSpan, seekTime } from "./frames";
 
 describe("frameAt", () => {
   it("maps a frame's presentation time to its index at 15 fps", () => {
@@ -15,5 +15,21 @@ describe("frameAt", () => {
   it("clamps to the frames the track has", () => {
     expect(frameAt(-0.5, 15, 9000)).toBe(0);
     expect(frameAt(601, 15, 9000)).toBe(8999);
+  });
+});
+
+describe("seekTime", () => {
+  it("lands inside the frame, so the video shows that frame and not the one before", () => {
+    for (const frame of [0, 1, 7, 120, 8999]) {
+      expect(frameAt(seekTime(frame, 15), 15, 9000)).toBe(frame);
+    }
+    expect(seekTime(15, 15)).toBeCloseTo(1 + 0.5 / 15); // the middle of frame 15
+  });
+});
+
+describe("frameSpan", () => {
+  it("gives the frames as written and the video time they span, the last frame included", () => {
+    expect(frameSpan(3000, 3090, 15)).toBe("frames 3000–3090 (3:20.0–3:26.1)");
+    expect(clock(59.96)).toBe("1:00.0"); // rounds up into the next minute, never "0:60.0"
   });
 });
