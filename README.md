@@ -9,6 +9,10 @@ match a computed value, or that prose fails the number audit.
 > **Research tool only.** Not validated for regulatory GLP studies. Rearing is not counted
 > (see [Limitations](#limitations)).
 
+**Live demo: <https://pharmavision-gh6a.onrender.com>.** It's read-only: 14 precomputed runs and
+one study report (see [The demo](#the-demo)). It runs on a free instance that sleeps when idle,
+so the first visit can take about a minute to wake it.
+
 Built for the Meta Global AI Developer Hackathon (Indie track, "Push the Frontier"), Oct 26 –
 Nov 4, 2026.
 
@@ -59,12 +63,37 @@ figures below are from measure settings v4, Nov 3, 2026; the report is the sourc
 | Rear count, ICC(2,1): candidates scoring ≥ 0.55 (an eval-only count) | 0.02–0.09 against each rater | raters against each other: 0.87–0.91 | **not met** |
 | Rear events, F1 (± 0.5 s): candidates scoring ≥ 0.55 | 0.60–0.62 against each rater | raters against each other: 0.87–0.89 | **not met** |
 | Rear events: every candidate window | recall 0.88–0.89, precision 0.40–0.41 against each rater | — | report only |
-| Number-audit pass rate | not measured yet: no study report has been made on the eval videos | 100% | — |
+| Number-audit pass rate | 1 of 1 study reports, on the first draft (216 numbers, every one matched) | 100% | **met** |
 
 The application promised rear counts that agree with the raters as well as they agree with each
 other. That was measured and is **not met**, so **the pipeline makes no rear count**
 ([ADR 0003](docs/adr/0003-no-rear-counts-score-as-evidence.md)). Each candidate window keeps its
 measured score and Muse Spark's opinion, shown per window, for a person to check.
+
+## The demo
+
+The live site shows the 14 eval videos, each run through every stage, and one study made from
+them, `sturman-null-split`.
+
+- **The study is a demonstration, not an experiment.** The Sturman open field videos have no
+  treatment groups, so the 14 untreated mice are split 7/7 at random (fixed seed) into "Cohort A"
+  and "Cohort B". No treatment was given and no difference is expected. The report finds none
+  (Student's t, p 0.42–0.78 across the six metrics). It exists to exercise the stats, the ARRIVE report and the
+  number audit end to end. `study.yaml` and the report both state this.
+- **What to look at:** a run's video with the floor, centre zone, mask and path overlaid; its
+  metrics, behaviour events and QC exclusions (each with frames and a reason); then the study's
+  report, with every `[TO FILL]` it abstained on.
+- **QC on the demo runs:** the hand placing the mouse at the start and lifting it out at the end
+  is excluded as a window, never the whole trial (the QC stage measures where each flag lies).
+  All 14 trials are analysed.
+- **Cost:** the Muse Spark clip and QC review for all 14 runs cost $2.36 on the Contributor tier
+  (about $0.12–0.27 a video). SAM 3.1 tracking costs about $1.83 per 10-minute video. Every
+  response is cached, so rebuilding the demo costs nothing.
+- **Rebuilding it:** `scripts/pack-demo.sh sturman-null-split` packs the runs and the study into a
+  tarball. The site's Docker build downloads it from the
+  [`demo-data-v1`](https://github.com/heyiamnotacoder/pharmavision/releases/tag/demo-data-v1)
+  release (`DEMO_URL`) and checks its checksum (`DEMO_SHA256`). Deploy: `Dockerfile` and
+  `render.yaml`.
 
 ## Limitations
 
