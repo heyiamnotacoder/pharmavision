@@ -116,7 +116,7 @@ class RearingAgreement(BaseModel):
     every_candidate: dict[str, Agreement]
     """Every candidate, against each rater: the recall-first windows (ADR 0001) as they are."""
     rater_pairs: dict[str, Agreement]
-    """Each pair of raters, `A~B`, against each other: the human-human range."""
+    """Each pair of raters, `A vs B`, against each other: the human-human range."""
 
     def human_range(self, metric: Metric) -> tuple[float, float] | None:
         """The lowest and highest agreement between two raters; None when none is defined."""
@@ -166,7 +166,7 @@ def rearing_agreement(videos: Sequence[VideoRears], settings: RearingSettings) -
         scored={r: agree(scored_windows, rears_of(r)) for r in raters},
         every_candidate={r: agree(every_window, rears_of(r)) for r in raters},
         rater_pairs={
-            f"{a}~{b}": agree(rears_of(a), rears_of(b)) for a, b in combinations(raters, 2)
+            f"{a} vs {b}": agree(rears_of(a), rears_of(b)) for a, b in combinations(raters, 2)
         },
     )
 

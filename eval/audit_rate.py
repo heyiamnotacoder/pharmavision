@@ -7,7 +7,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from pharmavision.artifacts import StudyFolder, StudyNotReadyError
+from pharmavision.artifacts import Report, StudyFolder, StudyNotReadyError
 from pharmavision.audit import audit_numbers, known_values
 from pharmavision.stages.report import tool_outputs
 
@@ -16,8 +16,9 @@ class StudyAudit(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     study_id: str
-    drafts: int
-    first_draft_passed: bool
+    drafts: int | None
+    """None when the report could not be read."""
+    first_draft_passed: bool | None
     """As audited when it was written: False when the agent needed the re-prompt."""
     passed: bool | None
     """The shipped draft, audited again now; None when it could not be (see `reason`)."""
@@ -51,34 +52,40 @@ class AuditRate(BaseModel):
 
 
 def audit_studies(studies_dir: Path, runs_dir: Path) -> AuditRate:
-    """Every study in `studies_dir` with a design and a report, its runs read from `runs_dir`."""
+    """Every study folder in `studies_dir` holding a report, its runs read from `runs_dir`. A
+    report that can't be read, or whose tables can't (no design, a run gone), is counted and
+    does not pass: it is never left out."""
     folders = sorted(p for p in studies_dir.iterdir() if p.is_dir()) if studies_dir.is_dir() else []
     studies = [StudyFolder(p) for p in folders]
-    return AuditRate(
-        studies=[_audit(s, runs_dir) for s in studies if s.has("design") and s.has("report")]
-    )
+    return AuditRate(studies=[_audit(s, runs_dir) for s in studies if s.has("report")])
 
 
 def _audit(study: StudyFolder, runs_dir: Path) -> StudyAudit:
-    report = study.report()
-    shipped = report.drafts[-1]
-    first = report.drafts[0].audit.passed
+    try:
+        report = study.report()
+    except ValidationError as error:
+        return _unchecked(study, None, f"its report.json could not be read: {error}")
     try:
         tables = tool_outputs(study, runs_dir)
     except (FileNotFoundError, StudyNotReadyError, ValidationError) as error:
-        return StudyAudit(
-            study_id=study.study_id,
-            drafts=len(report.drafts),
-            first_draft_passed=first,
-            passed=None,
-            unmatched=[],
-            reason=f"its tables could not be read: {error}",
-        )
+        return _unchecked(study, report, f"its tables could not be read: {error}")
+    shipped = report.drafts[-1]
     audit = audit_numbers(shipped.markdown, known_values(tables), report.settings.audit)
     return StudyAudit(
         study_id=study.study_id,
         drafts=len(report.drafts),
-        first_draft_passed=first,
+        first_draft_passed=report.drafts[0].audit.passed,
         passed=audit.passed,
         unmatched=[n.text for n in audit.unmatched],
+    )
+
+
+def _unchecked(study: StudyFolder, report: Report | None, reason: str) -> StudyAudit:
+    return StudyAudit(
+        study_id=study.study_id,
+        drafts=None if report is None else len(report.drafts),
+        first_draft_passed=None if report is None else report.drafts[0].audit.passed,
+        passed=None,
+        unmatched=[],
+        reason=reason,
     )

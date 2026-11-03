@@ -113,9 +113,9 @@ def test_the_raters_are_compared_pair_by_pair_and_their_range_is_given() -> None
     agreement = rearing_agreement(videos, SETTINGS)
 
     assert agreement.raters == ["A", "B", "C"]
-    assert list(agreement.rater_pairs) == ["A~B", "A~C", "B~C"]
-    assert agreement.rater_pairs["A~B"].events.f1 == pytest.approx(1.0)
-    assert agreement.rater_pairs["A~C"].events.f1 == pytest.approx(2 * 2 / (3 + 3))
+    assert list(agreement.rater_pairs) == ["A vs B", "A vs C", "B vs C"]
+    assert agreement.rater_pairs["A vs B"].events.f1 == pytest.approx(1.0)
+    assert agreement.rater_pairs["A vs C"].events.f1 == pytest.approx(2 * 2 / (3 + 3))
     assert agreement.human_range("f1") == (pytest.approx(2 / 3), pytest.approx(1.0))
 
 

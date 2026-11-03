@@ -101,14 +101,24 @@ def render(report: EvalReport) -> str:
         "## Not measured here",
         "- **Supported vs unsupported rears:** the label set is binary (rearing / none), since "
         "Muse Spark could not tell them apart (ARCHITECTURE, open decision 3).\n"
-        "- **Muse Spark's rear labels against the raters** on the eval split: it is a second "
-        "opinion only (ADR 0002); its train-split agreement is in ARCHITECTURE, open decision 3.",
+        "- **Muse Spark's rear labels against the raters and the score** on the eval split, "
+        "which ADR 0003 (point 3) asks the harness to keep measuring: it needs the behaviours "
+        "stage run on the eval videos (new Muse Spark spend), so it is not in this report yet. "
+        "Its train-split agreement is in ARCHITECTURE, open decision 3.",
     ]
     return "\n\n".join(parts) + "\n"
 
 
+def _threshold(rearing: RearingAgreement) -> str:
+    return f"{rearing.settings.count_threshold:.2f}"
+
+
 def _num(value: float | None, digits: int = 2) -> str:
     return "—" if value is None else f"{value:.{digits}f}"
+
+
+def _yes_no(value: bool | None) -> str:
+    return "—" if value is None else "yes" if value else "no"
 
 
 def _range(bounds: tuple[float, float] | None) -> str:
@@ -137,7 +147,7 @@ def _validation(report: EvalReport) -> list[str]:
     if rearing is None:
         parts.append("Rearing agreement abstains: no eval video has a tracked run and labels.")
     else:
-        threshold = f"{rearing.settings.count_threshold:.2f}"
+        threshold = _threshold(rearing)
         tolerance = f"±{rearing.settings.tolerance_s:g} s"
         metrics: tuple[tuple[str, Metric], ...] = (
             ("Rear count, ICC(2,1)", "count_icc"),
@@ -177,8 +187,9 @@ def _validation(report: EvalReport) -> list[str]:
             f"0003): the eval counts the candidates scoring at least {threshold} (a threshold "
             f"set on the train split's counts, in the eval only) to measure how far such a "
             f"count would be from the raters, and every candidate beside it. A window and a "
-            f"rear match when they lie within {rearing.settings.tolerance_s:g} s of each other, "
-            f"each in one pair at most."
+            f"rear match when they overlap or the gap between them is at most "
+            f"{rearing.settings.tolerance_s:g} s (not their onsets: a long window can match a rear "
+            f"anywhere in it), each in one pair at most, pairing as many as possible."
         )
         if report.rearing_missing:
             parts.append(
@@ -193,7 +204,7 @@ def _validation(report: EvalReport) -> list[str]:
                     "Number-audit pass rate",
                     f"{audit.passed} of {audit.total} study reports ({rate})",
                     "100%",
-                    "yes" if audit.met else "no",
+                    "—" if audit.rate is None else "yes" if audit.met else "no",
                 ]
             ],
         )
@@ -205,7 +216,7 @@ def _per_video(report: EvalReport) -> list[str]:
     rearing = report.rearing
     if rearing is None:
         return ["No eval video to show."]
-    threshold = f"{rearing.settings.count_threshold:.2f}"
+    threshold = _threshold(rearing)
     rows = [
         [v.video_id, str(v.scored), str(v.candidates), *(str(v.raters[r]) for r in rearing.raters)]
         for v in rearing.per_video
@@ -222,28 +233,26 @@ def _events(report: EvalReport) -> list[str]:
     rearing = report.rearing
     if rearing is None:
         return ["No eval video to show."]
-    threshold = f"{rearing.settings.count_threshold:.2f}"
+    threshold = _threshold(rearing)
     rows: list[list[str]] = []
-    groups = (
-        (f"scoring ≥ {threshold}", rearing.scored),
-        ("every candidate", rearing.every_candidate),
-        ("rater", rearing.rater_pairs),
-    )
-    for name, against in groups:
-        for target, agreement in against.items():
-            e = agreement.events
-            who = target.replace("~", " vs ") if name == "rater" else f"{name} vs {target}"
-            rows.append(
-                [
-                    who,
-                    str(e.matched),
-                    str(e.windows),
-                    str(e.rears),
-                    _num(e.precision),
-                    _num(e.recall),
-                    _num(e.f1),
-                ]
-            )
+    labelled = {
+        **{f"scoring ≥ {threshold} vs {r}": a for r, a in rearing.scored.items()},
+        **{f"every candidate vs {r}": a for r, a in rearing.every_candidate.items()},
+        **rearing.rater_pairs,
+    }
+    for who, agreement in labelled.items():
+        e = agreement.events
+        rows.append(
+            [
+                who,
+                str(e.matched),
+                str(e.windows),
+                str(e.rears),
+                _num(e.precision),
+                _num(e.recall),
+                _num(e.f1),
+            ]
+        )
     return [
         _table(
             ["Windows vs rears", "Matched", "Windows", "Rears", "Precision", "Recall", "F1"], rows
@@ -258,9 +267,9 @@ def _audit(audit: AuditRate) -> list[str]:
     rows = [
         [
             s.study_id,
-            str(s.drafts),
-            "yes" if s.first_draft_passed else "no",
-            "—" if s.passed is None else "yes" if s.passed else "no",
+            "—" if s.drafts is None else str(s.drafts),
+            _yes_no(s.first_draft_passed),
+            _yes_no(s.passed),
             ", ".join(s.unmatched) or s.reason or "",
         ]
         for s in audit.studies

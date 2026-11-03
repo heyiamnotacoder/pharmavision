@@ -78,6 +78,21 @@ def test_a_report_whose_runs_are_gone_cannot_be_checked_and_does_not_count_as_pa
     assert (rate.passed, rate.total, rate.met) == (0, 1, False)
 
 
+def test_a_report_that_cannot_be_read_or_has_no_design_counts_as_not_passing(
+    tmp: Path, studies: Path, runs_dir: Path
+) -> None:
+    honest = reported(tmp, studies, runs_dir, "honest", ("vehicle", "diazepam"), HONEST)
+    (studies / "orphan").mkdir()
+    shutil.copy(honest.path / "report.json", studies / "orphan" / "report.json")
+    (honest.path / "report.json").write_text('{"drafts": []}')
+
+    rate = audit_studies(studies, runs_dir)
+
+    assert [(s.study_id, s.passed) for s in rate.studies] == [("honest", None), ("orphan", None)]
+    assert all(s.reason for s in rate.studies)
+    assert (rate.passed, rate.total, rate.met) == (0, 2, False)
+
+
 def test_with_no_study_reports_the_pass_rate_abstains(studies: Path, runs_dir: Path) -> None:
     (studies / "no-report").mkdir()
     (studies / "no-report" / "study.yaml").write_text("name: x\n")

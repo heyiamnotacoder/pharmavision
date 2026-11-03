@@ -95,3 +95,16 @@ def test_the_report_is_the_same_each_time_it_is_made(
     again = render(build_report(SPLIT, paths, label_file, studies, runs_dir, EVERY_SCORE))
 
     assert first == again
+
+
+def test_with_no_study_report_the_audit_row_abstains_instead_of_failing(
+    tmp_path: Path, paths: Paths, runs_dir: Path
+) -> None:
+    report = build_report(
+        SPLIT, paths, labels(tmp_path, *LABEL_ROWS), tmp_path / "none", runs_dir, EVERY_SCORE
+    )
+
+    markdown = render(report)
+
+    assert "| Number-audit pass rate | 0 of 0 study reports (—) | 100% | — |" in markdown
+    assert "No study report found: the pass rate abstains." in markdown

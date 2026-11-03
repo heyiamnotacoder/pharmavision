@@ -8,8 +8,8 @@ Usage:
   uv run python -m eval report         # eval/REPORT.md from stored results; no model call
 
 `report` reads the tracked runs, the tracking results and the study reports (`studies/`, their
-runs in `runs/`; `--studies`, `--runs-dir`) and exits non-zero unless every study report passes
-the number audit again.
+runs in `runs/`; `--studies`, `--runs-dir`) and exits non-zero unless there is a study report
+and every one passes the number audit again.
 
 Every command first checks that no label file can be committed (`eval.guard`) and, once the
 labels are fetched, that `eval/split.json` is the seeded split of the labelled videos. Results:
@@ -129,8 +129,8 @@ def report(studies: Path, runs_dir: Path, out: Path, paths: Paths) -> None:
     if made.rearing_missing:
         print(f"rearing: no tracked run for {made.rearing_missing}; run `python -m eval track`")
     if not audit.studies:
-        print(f"number audit: no study report under {studies}; the pass rate abstains")
-    elif not audit.met:
+        raise SystemExit(f"number audit: no study report under {studies}; the bar is not shown")
+    if not audit.met:
         failing = [s.study_id for s in audit.studies if s.passed is not True]
         raise SystemExit(f"number audit: {audit.passed} of {audit.total} pass; failing {failing}")
 
