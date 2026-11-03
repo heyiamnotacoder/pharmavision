@@ -30,7 +30,7 @@ from pharmavision.segmenter.meta_api import MetaApiSegmenter, MetaApiSettings
 
 from .guard import check_labels_untracked
 from .harness import (
-    ArenaNotFoundError,
+    FloorNotFoundError,
     Paths,
     TrackingSummary,
     evaluate_video,
@@ -101,7 +101,7 @@ def track(yes: bool, paths: Paths) -> TrackingSummary:
         video, dlc_csv = fetch_video(video_id), fetch_dlc(dlc[video_id])
         try:
             result = evaluate_video(video_id, video, dlc_csv, segmenter, meter, paths)
-        except ArenaNotFoundError as error:
+        except FloorNotFoundError as error:
             print(f"{video_id}: skipped, {error}", flush=True)
             continue
         tracking = result.tracking

@@ -62,6 +62,8 @@ select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "NPY", "PD"]
 
 [tool.pyright]
 include = ["src", "tests", "spike", "eval"]
+# Git-ignored downloads and local scratch, never part of the repo.
+exclude = ["eval/data"]
 pythonVersion = "3.12"
 typeCheckingMode = "standard"
 # NFR-6: the measure and stats layers are where every number comes from, and the audit is what

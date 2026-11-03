@@ -1,6 +1,6 @@
 """One eval video through the pipeline (ingest, arena auto-confirmed, track) and compared with
-DeepLabCut, with what its model calls cost logged whether or not it finished. Its run folder is
-kept and reused, so comparing again costs nothing."""
+DeepLabCut, with what its model calls cost logged whether or not it finished. A tracked run
+folder is kept and reused, so comparing again costs nothing."""
 
 import json
 import shutil
@@ -30,9 +30,9 @@ FLOOR_PROMPTS = ("square floor", "white floor", "open field arena", "floor", "bo
 "white floor" and OFT_39 "floor" (spike, Oct 31). The template's own prompt goes first."""
 
 
-class ArenaNotFoundError(RuntimeError):
-    """SAM 3.1 found no floor with any of the floor prompts: the arena stage left an empty
-    arena, which the harness cannot confirm without a human drawing it."""
+class FloorNotFoundError(LookupError):
+    """SAM 3.1 found no floor with any of the prompts: the app would ask the scientist to draw
+    it, which the eval can't."""
 
 
 @dataclass(frozen=True)
@@ -215,9 +215,9 @@ def _tracked_run(
         run = start_run(video, attempt, segmenter, runs_dir, run_id=video_id)
         if run.arena().floor_px:
             break
-        shutil.rmtree(run.path)  # an empty arena: no floor for this prompt
+        shutil.rmtree(run.path)  # an empty arena, left for a human to draw; try the next prompt
     else:
-        raise ArenaNotFoundError(f"{video_id}: no floor found with any of {list(prompts)}")
+        raise FloorNotFoundError(f"{video_id}: no floor found with any of {list(prompts)}")
     confirm_arena(run)
     run_stage(run, Stage.TRACK, segmenter, _NoJudge())
     return run
