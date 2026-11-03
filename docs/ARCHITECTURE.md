@@ -401,7 +401,7 @@ purity.
 
 - **No human ground truth for position.** The repo's `Output_DLC` CSVs are DeepLabCut *model*
   output. Use them as a reference tracker to compare against, never as ground truth.
-- **Licence:** the repo is GPL-3.0. Download the label CSVs at eval time into a git-ignored folder,
+- **Licence:** the DLCAnalyzer repo is GPL-3.0. Download the label CSVs at eval time into a git-ignored folder,
   never commit them into the MIT repo. Credit the Zenodo videos (CC BY 4.0) in the README.
 
 | What | Reference | Metric | Pass bar |
