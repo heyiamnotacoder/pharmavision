@@ -29,10 +29,9 @@ from .artifacts import (
     StudyStats,
 )
 from .judge import Judge
-from .measure.geometry import Point
+from .measure.geometry import InvalidFloorError, Point, check_floor
 from .segmenter import Segmenter
 from .stages import arena, behaviours, ingest, measure, qc, report, stats, track
-from .stages.arena import InvalidFloorError
 from .stages.ingest import VideoTooShortError
 from .templates import TestTemplate
 
@@ -44,8 +43,8 @@ __all__ = [
     "StudyFolder",
     "StudyNotReadyError",
     "VideoTooShortError",
+    "arena_to_confirm",
     "confirm_arena",
-    "confirmed_arena",
     "finish_run",
     "new_run_id",
     "run_stage",
@@ -131,12 +130,12 @@ def confirm_arena(run: RunFolder, floor_px: list[Point] | None = None) -> Arena:
     `floor_px`, the floor as they edited or drew it, and the centre zone and the scale derived
     from it again. Raises InvalidFloorError, confirming nothing, for a floor the zones can't
     come from, or for no floor at all."""
-    confirmed = confirmed_arena(run, floor_px)
+    confirmed = arena_to_confirm(run, floor_px)
     run.write_arena(confirmed)
     return confirmed
 
 
-def confirmed_arena(run: RunFolder, floor_px: list[Point] | None = None) -> Arena:
+def arena_to_confirm(run: RunFolder, floor_px: list[Point] | None = None) -> Arena:
     """The arena `confirm_arena` would write, checked but not written: so a caller can refuse a
     floor before it commits to confirming."""
     if floor_px is None:
@@ -145,7 +144,7 @@ def confirmed_arena(run: RunFolder, floor_px: list[Point] | None = None) -> Aren
             raise InvalidFloorError("no floor was found: draw the floor before confirming")
     else:
         manifest = run.manifest()
-        arena.check_floor(floor_px, manifest.video.width, manifest.video.height)
+        check_floor(floor_px, manifest.video.width, manifest.video.height)
         current = arena.zones(floor_px, manifest.template)
     return current.model_copy(update={"confirmed": True})
 

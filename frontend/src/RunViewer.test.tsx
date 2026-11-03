@@ -102,7 +102,9 @@ describe("RunViewer", () => {
   it("has a live run at the gate checked in the zone editor, then shows it running", async () => {
     render(<RunViewer runId="r2" />);
     const confirm = await screen.findByRole("button", { name: "Confirm zones" });
-    served["/api/runs/r2"] = { ...atGate, status: "running" };
+    // The API writes the confirmed arena before it answers.
+    served["/api/runs/r2"] = { ...atGate, status: "running", stage: "track" };
+    served["/api/runs/r2/artifacts/arena"] = { ...arena, confirmed: true };
 
     fireEvent.click(confirm);
 

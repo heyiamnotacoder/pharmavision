@@ -101,7 +101,7 @@ def test_an_edited_floor_moves_the_centre_zone_and_the_scale(
 ) -> None:
     video = make_video(tmp_path / "trial.mp4", seconds=4)
     run = start_run(video, TEMPLATE, SyntheticSegmenter(floor=FLOOR), runs_dir)
-    # The scientist pulls two corners in: a 270 px square, 6 cm/px of 45 cm.
+    # The scientist pulls two corners in: a 270 px square, 270 px / 45 cm = 6 px/cm.
     edited = [(30.0, 30.0), (300.0, 30.0), (300.0, 300.0), (30.0, 300.0)]
 
     confirm_arena(run, edited)

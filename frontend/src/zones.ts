@@ -43,11 +43,20 @@ export function toImagePoint(
   width: number,
   height: number,
 ): Point {
-  const clamp = (v: number, max: number) => Math.min(Math.max(Math.round(v * 10) / 10, 0), max);
-  return [
-    clamp(((clientX - box.left) / box.width) * width, width),
-    clamp(((clientY - box.top) / box.height) * height, height),
-  ];
+  const tenth = (v: number) => Math.round(v * 10) / 10;
+  return clampPoint(
+    [
+      tenth(((clientX - box.left) / box.width) * width),
+      tenth(((clientY - box.top) / box.height) * height),
+    ],
+    width,
+    height,
+  );
+}
+
+/** The point moved onto the `width` x `height` frame, as the backend requires of corners. */
+export function clampPoint([x, y]: Point, width: number, height: number): Point {
+  return [Math.min(Math.max(x, 0), width), Math.min(Math.max(y, 0), height)];
 }
 
 /** The floor with corner `index` at `to`; the floor given is left as it was. */

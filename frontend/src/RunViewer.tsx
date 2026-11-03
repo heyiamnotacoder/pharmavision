@@ -68,12 +68,6 @@ export function RunViewer({ runId }: { runId: string }) {
   const reload = useCallback(() => {
     setLoads((n) => n + 1);
   }, []);
-  /** This page confirmed the zones: the job writes the confirmed arena a moment later. */
-  const [confirmedHere, setConfirmedHere] = useState(false);
-  const onConfirmed = useCallback(() => {
-    setConfirmedHere(true);
-    reload();
-  }, [reload]);
   const running = data !== null && !RESTING.has(data.view.status);
   const videoRef = useRef<HTMLVideoElement>(null);
   const fps = data?.manifest.video.fps;
@@ -135,10 +129,10 @@ export function RunViewer({ runId }: { runId: string }) {
           height={manifest.video.height}
           arena={arena}
           centreFraction={manifest.template.centre_area_fraction}
-          onConfirmed={onConfirmed}
+          onConfirmed={reload}
         />
       ) : null}
-      {running && (confirmedHere || arena?.confirmed) ? (
+      {running && arena?.confirmed ? (
         <p className="status">
           Zones confirmed: {view.stage ?? "the next stage"} is running ({view.stages_done.length}{" "}
           stages done).

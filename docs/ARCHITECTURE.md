@@ -426,7 +426,7 @@ the demo and write-up, the same way PaedScale published its validation table.
   | `POST /runs` | upload a video (multipart `video`) and a `template` name; 202, then ingest + arena run in the background |
   | `GET /runs`, `GET /runs/{id}` | status, the stage running (or the one that failed), the error, `stages_done`, and a URL per artifact present |
   | `GET /runs/{id}/artifacts/{name}` | `manifest`, `arena`, `track`, `metrics`, `events` or `qc` as JSON, validated on read; `GET /runs/{id}/video` the normalised MP4 |
-  | `POST /runs/{id}/arena/confirm` | the gate, with an optional JSON body `{"floor_px": [[x, y], …]}`, the floor as edited or drawn: 202, then track → QC in the background; 409 unless the run is `awaiting zone confirmation`; 422, leaving it there, for a floor the zones can't come from, or none on an empty arena. The floor is checked before the gate is claimed |
+  | `POST /runs/{id}/arena/confirm` | the gate, with an optional JSON body `{"floor_px": [[x, y], …]}`, the floor as edited or drawn: 202, then track → QC in the background; 409 unless the run is `awaiting zone confirmation`; 422, leaving it there, for a floor the zones can't come from, or none on an empty arena. The floor is checked before the gate is claimed, and the confirmed arena written before the response |
   | `GET /runs/{id}/background` | the background frame (PNG) the zone editor draws on |
   | `GET /runs/{id}/stream` | SSE: one `stage` event per finished stage (its `id` is the resume point for `Last-Event-ID`), then one `status` event once the run rests, and the stream ends |
   | `GET /studies` | every study folder with a `study.yaml`, as `GET /studies/{id}` shows it |

@@ -7,19 +7,20 @@ from collections.abc import Sequence
 import cv2
 import numpy as np
 from numpy.typing import NDArray
-from shapely.geometry import Polygon
 
 from ..artifacts import Arena, RunFolder
-from ..measure.geometry import Point, px_per_cm, shrink_to_area_fraction
+from ..measure.geometry import (
+    InvalidFloorError,
+    Point,
+    check_floor,
+    px_per_cm,
+    shrink_to_area_fraction,
+)
 from ..segmenter import Segmenter, best_mask
 from ..templates import TestTemplate
 
 EMPTY = Arena(floor_px=[], centre_px=[], px_per_cm=0.0, confirmed=False)
 """What the stage leaves when no floor was found: the scientist draws one at the gate."""
-
-
-class InvalidFloorError(ValueError):
-    pass
 
 
 def run(run: RunFolder, segmenter: Segmenter) -> Arena:
@@ -48,21 +49,6 @@ def zones(floor: Sequence[Point], template: TestTemplate) -> Arena:
         px_per_cm=px_per_cm(floor, template.arena_width_cm, template.arena_height_cm),
         confirmed=False,
     )
-
-
-def check_floor(floor: Sequence[Point], width: int, height: int) -> None:
-    """Refuse a floor the zones can't be derived from: fewer than 3 corners, a corner off the
-    frame, edges that cross, or no area."""
-    if len(floor) < 3:
-        raise InvalidFloorError(f"a floor needs at least 3 corners, not {len(floor)}")
-    off = [p for p in floor if not (0 <= p[0] <= width and 0 <= p[1] <= height)]
-    if off:
-        raise InvalidFloorError(f"corner {off[0]} is outside the {width} x {height} px frame")
-    polygon = Polygon(floor)
-    if polygon.convex_hull.area == 0:
-        raise InvalidFloorError("the floor has no area: its corners are on one line")
-    if not polygon.is_valid:
-        raise InvalidFloorError("the floor's edges cross")
 
 
 def background_frame(run: RunFolder, samples: int) -> NDArray[np.uint8]:

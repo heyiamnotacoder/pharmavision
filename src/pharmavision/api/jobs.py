@@ -13,7 +13,9 @@ from pydantic import BaseModel, ConfigDict
 
 JobKind = Literal["run", "study"]
 JobStatus = Literal["queued", "running", "awaiting zone confirmation", "done", "failed"]
-RESTING: frozenset[JobStatus] = frozenset({"awaiting zone confirmation", "done", "failed"})
+AT_GATE: JobStatus = "awaiting zone confirmation"
+"""A run's status between its two jobs: its zones wait for a person to confirm them."""
+RESTING: frozenset[JobStatus] = frozenset({AT_GATE, "done", "failed"})
 """Statuses no background job will move on from by itself: a human has to act, or it ended."""
 
 _SCHEMA = """

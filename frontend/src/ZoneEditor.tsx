@@ -1,13 +1,14 @@
 import { useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { api, type Arena, type Point } from "./api";
 import { COLOURS } from "./overlay";
-import { centreZone, moveCorner, toImagePoint } from "./zones";
+import { centreZone, clampPoint, moveCorner, toImagePoint } from "./zones";
 
 /** The corners a drawn floor gets: the open field is a rectangle. */
 const DRAWN_CORNERS = 4;
 
-/** Arrow keys move a focused corner this far, in video pixels; ten times as far with Shift. */
+/** Arrow keys move a focused corner this far, in video pixels, and Shift+arrow this far. */
 const KEY_STEP_PX = 1;
+const SHIFT_KEY_STEP_PX = 10;
 
 const KEY_MOVES: Record<string, Point> = {
   ArrowLeft: [-1, 0],
@@ -89,14 +90,9 @@ export function ZoneEditor({
     const corner = floor[index];
     if (!move || !corner) return;
     e.preventDefault();
-    const step = KEY_STEP_PX * (e.shiftKey ? 10 : 1);
-    const clamp = (v: number, max: number) => Math.min(Math.max(v, 0), max);
-    setFloor(
-      moveCorner(floor, index, [
-        clamp(corner[0] + move[0] * step, width),
-        clamp(corner[1] + move[1] * step, height),
-      ]),
-    );
+    const step = e.shiftKey ? SHIFT_KEY_STEP_PX : KEY_STEP_PX;
+    const to: Point = [corner[0] + move[0] * step, corner[1] + move[1] * step];
+    setFloor((f) => moveCorner(f, index, clampPoint(to, width, height)));
   };
 
   const confirm = () => {

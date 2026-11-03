@@ -269,7 +269,7 @@ class Arena(Artifact):
     confirmed: bool
 
     @model_validator(mode="after")
-    def _only_a_floor_is_confirmed(self) -> "Arena":
+    def _whole_or_empty_and_only_a_floor_confirmed(self) -> "Arena":
         empty = (not self.floor_px, not self.centre_px, self.px_per_cm == 0)
         if any(empty) and not all(empty):
             raise ValueError("an arena has a floor, a centre and a scale, or none of them")
