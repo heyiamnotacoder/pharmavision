@@ -86,10 +86,18 @@ export interface QcFlag {
   reason: string;
 }
 
+/** The models' look at one flagged window, and the verdict (as `artifacts.QcReview`). */
+export interface QcReview {
+  flag: QcFlag;
+  verdict: "keep" | "exclude_window" | "exclude_trial";
+  reason: string;
+}
+
 export interface Qc {
   flags: QcFlag[];
   exclusions: Exclusion[];
-  reviews: { flag: QcFlag; verdict: "keep" | "exclude_window" | "exclude_trial"; reason: string }[];
+  /** One per warning the models reviewed, in flag order. */
+  reviews: QcReview[];
 }
 
 /** One number in the report prose, and the computed value it matched: `source` null when none
@@ -97,13 +105,24 @@ export interface Qc {
 export interface AuditedNumber {
   text: string;
   sentence: string;
+  /** The sentence's start and end offsets in the draft's report. */
+  sentence_span: [number, number];
   source: string | null;
+}
+
+export interface NumberAudit {
+  /** In the order they appear. */
+  numbers: AuditedNumber[];
+}
+
+export interface ReportDraft {
+  audit: NumberAudit;
 }
 
 export interface Report {
   model_id: string;
   /** Every draft the number audit saw; the last one is the report. */
-  drafts: { audit: { numbers: AuditedNumber[] } }[];
+  drafts: ReportDraft[];
   /** The report as shipped: `[TO FILL: …]` placeholders for what the system cannot know, and
    * each sentence that failed the audit struck out and flagged. */
   markdown: string;
@@ -111,7 +130,10 @@ export interface Report {
 
 export interface StudyView {
   study_id: string;
+  /** Null: no report has been asked for yet. */
   status: JobStatus | null;
+  /** The stage running now; after a failure, the stage that failed. */
+  stage: string | null;
   error: string | null;
   stages_done: string[];
   artifacts: Partial<Record<"design" | "trials" | "stats" | "report", string>>;

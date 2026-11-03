@@ -361,8 +361,10 @@ purity.
     a failure the agent is re-prompted (its draft as an assistant turn, then each unmatched
     number with its sentence). `max_drafts` is 2: when the second draft fails too, each
     sentence holding an unmatched number ships as `~~sentence~~ **[failed the number
-    audit]**`, and `Report.struck` lists the numbers. Every draft and its audit stay in
-    `report.json`.
+    audit]**`, and `Report.struck` lists the numbers. A heading's, quote's or list item's
+    marker stays outside the strike; a table row (one sentence to the audit) is struck cell by
+    cell with the flag in its last cell, since GFM splits a row into cells before it reads
+    `~~`. Every draft and its audit stay in `report.json`.
   - **Live check:** the function-calling event shape and whether Muse Spark accepts a
     `function_call` item without the reasoning item that preceded it. **Checked live Oct 31**
     (PR #35): Muse Spark sent `reasoning`, a `message`, then 5 parallel `function_call` items,
@@ -448,8 +450,8 @@ the demo and write-up, the same way PaedScale published its validation table.
     first), with the time they start at. Seeking to frame i sets the video to the middle of
     its interval, `(i + 0.5) / fps`, so the player shows frame i and not the one before.
   - **Timeline (T11):** under the player, one bar per lane over the trial's frames: each
-    judged rear candidate (green rearing, grey none, hatched when low-confidence), and each
-    QC exclusion (red). A click seeks the video to the window's first frame. Below the
+    behaviour event (green rearing, grey none, hatched when low-confidence), and each QC
+    exclusion (red; a whole-trial exclusion spans the bar, hatched). A click seeks the video to the window's first frame. Below the
     metrics, the QC list has every exclusion in `qc.json` with its frames, reason and
     whether a rule or the model decided it; its frames seek too.
   - **Report view (T11):** `report.json`'s shipped Markdown, rendered by `react-markdown` with

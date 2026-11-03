@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api, type RunView, type StudyView } from "./api";
 import { routeFromHash } from "./route";
 import { RunViewer } from "./RunViewer";
+import { reportStatus } from "./study";
 import { StudyViewer } from "./StudyViewer";
 
 export function App() {
@@ -23,7 +24,10 @@ export function App() {
         <h1>
           <a href="#/">PharmaVision</a>
         </h1>
-        <p>Rodent test video in, scored and audited results out.</p>
+        <p>
+          Rodent test video in, scored and audited results out. A research tool: not validated for
+          regulatory (GLP) studies.
+        </p>
       </header>
       {route.screen === "run" ? (
         <RunViewer key={route.id} runId={route.id} />
@@ -66,15 +70,7 @@ function StudyList() {
             <td>
               <a href={`#/studies/${encodeURIComponent(study.study_id)}`}>{study.study_id}</a>
             </td>
-            <td>
-              {study.artifacts.report
-                ? "ready"
-                : study.status === null
-                  ? "not asked for"
-                  : study.error
-                    ? `${study.status}: ${study.error}`
-                    : study.status}
-            </td>
+            <td>{reportStatus(study)}</td>
           </tr>
         ))}
       </tbody>

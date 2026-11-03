@@ -1,6 +1,6 @@
-import type { Qc } from "./api";
-import { frameSpan } from "./frames";
-import { plural } from "./text";
+import type { Qc, QcFlag } from "./api";
+import { frameSpan, windowKey } from "./frames";
+import { plural } from "./plural";
 
 /** Every exclusion in the run's QC artifact, so nothing is dropped silently. A window's frames
  * seek the video there. */
@@ -13,9 +13,11 @@ export function QcList({
   fps: number;
   onSeek: (frame: number) => void;
 }) {
-  const warnings = qc.flags.filter((f) => f.severity === "warning").length;
+  const count = (severity: QcFlag["severity"]) =>
+    qc.flags.filter((flag) => flag.severity === severity).length;
+  const warnings = count("warning");
   const summary =
-    `${plural(qc.flags.length, "QC flag")} (${String(qc.flags.length - warnings)} critical, ` +
+    `${plural(qc.flags.length, "QC flag")} (${String(count("critical"))} critical, ` +
     `${plural(warnings, "warning")}); ${String(qc.reviews.length)} reviewed by the model.`;
   return (
     <section className="qc">
@@ -32,22 +34,22 @@ export function QcList({
             </tr>
           </thead>
           <tbody>
-            {qc.exclusions.map((x) => (
-              <tr key={`${x.scope}-${String(x.first_frame)}-${String(x.last_frame)}`}>
-                <td>{x.scope === "trial" ? "whole trial" : "window"}</td>
+            {qc.exclusions.map((exclusion) => (
+              <tr key={windowKey(exclusion)}>
+                <td>{exclusion.scope === "trial" ? "whole trial" : "window"}</td>
                 <td className="number">
                   <button
                     type="button"
                     className="link"
                     onClick={() => {
-                      onSeek(x.first_frame);
+                      onSeek(exclusion.first_frame);
                     }}
                   >
-                    {frameSpan(x.first_frame, x.last_frame, fps)}
+                    {frameSpan(exclusion.first_frame, exclusion.last_frame, fps)}
                   </button>
                 </td>
-                <td>{x.reason}</td>
-                <td>{x.source}</td>
+                <td>{exclusion.reason}</td>
+                <td>{exclusion.source}</td>
               </tr>
             ))}
           </tbody>

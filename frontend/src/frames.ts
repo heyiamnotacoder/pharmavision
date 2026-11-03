@@ -26,6 +26,11 @@ export function clock(seconds: number): string {
   return `${String(minutes)}:${rest}`;
 }
 
+/** A key for a window of frames, unique among a list's windows. */
+export function windowKey(w: { first_frame: number; last_frame: number; scope?: string }): string {
+  return `${w.scope ?? ""}${String(w.first_frame)}-${String(w.last_frame)}`;
+}
+
 /** Frames `first` to `last` (inclusive), and the stretch of video they span. */
 export function frameSpan(first: number, last: number, fps: number): string {
   return `frames ${String(first)}–${String(last)} (${clock(first / fps)}–${clock((last + 1) / fps)})`;

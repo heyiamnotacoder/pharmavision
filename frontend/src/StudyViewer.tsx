@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, getJson, type Report, type StudyView } from "./api";
 import { ReportView } from "./ReportView";
+import { reportStatus } from "./study";
 
 async function loadStudy(studyId: string): Promise<[StudyView, Report | null]> {
   const view = await api.study(studyId);
@@ -44,14 +45,7 @@ export function StudyViewer({ studyId }: { studyId: string }) {
       {report ? (
         <ReportView report={report} />
       ) : (
-        <p className="missing">
-          No report yet
-          {study.status === null
-            ? ": none has been asked for."
-            : study.error
-              ? `: ${study.status} at ${study.stages_done.at(-1) ?? "stats"}: ${study.error}`
-              : ` (${study.status}).`}
-        </p>
+        <p className="missing">No report yet: {reportStatus(study)}.</p>
       )}
     </section>
   );

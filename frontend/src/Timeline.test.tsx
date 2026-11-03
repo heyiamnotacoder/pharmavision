@@ -36,8 +36,23 @@ describe("Timeline", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: /^none, frames 900–910/ }));
     expect(onSeek).toHaveBeenLastCalledWith(900);
-    fireEvent.click(screen.getByRole("button", { name: /^excluded, frames 3000–3090/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^excluded: window, frames 3000–3090/ }));
     expect(onSeek).toHaveBeenLastCalledWith(3000);
+  });
+
+  it("draws a trial exclusion apart from a window, and says it covers the whole trial", () => {
+    render(
+      <Timeline
+        events={[]}
+        exclusions={[{ ...exclusion, scope: "trial", first_frame: 0, last_frame: 8999 }]}
+        nFrames={9000}
+        fps={15}
+        frame={0}
+        onSeek={vi.fn()}
+      />,
+    );
+    const bar = screen.getByRole("button", { name: /^excluded: whole trial, frames 0–8999/ });
+    expect(bar).toHaveClass("exclusion", "trial");
   });
 
   it("says which lanes have no artifact yet instead of drawing them empty", () => {

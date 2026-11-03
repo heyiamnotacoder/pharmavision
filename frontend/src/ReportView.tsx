@@ -3,7 +3,7 @@ import { findAndReplace } from "mdast-util-find-and-replace";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Report } from "./api";
-import { plural } from "./text";
+import { plural } from "./plural";
 
 /** As `arrive.placeholder` writes them. */
 const TO_FILL = /\[TO FILL: [^\]\n]*\]/g;
@@ -42,7 +42,8 @@ function remarkReportMarks() {
 function auditSummary(report: Report): string {
   const numbers = report.drafts.at(-1)?.audit.numbers ?? [];
   const failed = numbers.filter((n) => n.source === null);
-  const sentences = new Set(failed.map((n) => n.sentence)).size;
+  // As `arrive.strike` strikes them: once per sentence, however many failed numbers it holds.
+  const sentences = new Set(failed.map((n) => n.sentence_span.join("-"))).size;
   const toFill = report.markdown.match(TO_FILL)?.length ?? 0;
   const audit = failed.length
     ? `Number audit failed: ${String(failed.length)} of ${plural(numbers.length, "number")} ` +
@@ -61,8 +62,7 @@ export function ReportView({ report }: { report: Report }) {
       <Markdown remarkPlugins={[remarkGfm, remarkReportMarks]}>{report.markdown}</Markdown>
       <p className="muted">
         Written by {report.model_id} from the computed tables after{" "}
-        {plural(report.drafts.length, "draft")}; research use only, not validated for regulatory GLP
-        studies.
+        {plural(report.drafts.length, "draft")}.
       </p>
     </article>
   );

@@ -1,5 +1,6 @@
+import type { ReactNode } from "react";
 import type { BehaviourEvent, Exclusion } from "./api";
-import { frameSpan } from "./frames";
+import { frameSpan, windowKey } from "./frames";
 
 interface TimelineProps {
   /** Null until the behaviours stage has run; likewise `exclusions` and the QC stage. */
@@ -12,74 +13,99 @@ interface TimelineProps {
   onSeek: (frame: number) => void;
 }
 
+/** One window on a lane: its frames (inclusive), its look, and what it says. */
+interface Mark {
+  first_frame: number;
+  last_frame: number;
+  className: string;
+  label: string;
+  title: string;
+}
+
+/** The trial's frames as a bar per lane: each behaviour event, and each exclusion. A click
+ * seeks the video to the window's first frame. */
+export function Timeline({ events, exclusions, nFrames, fps, frame, onSeek }: TimelineProps) {
+  const lane = (name: string, marks: Mark[] | null, missing: string) => (
+    <Lane name={name} missing={missing} nFrames={nFrames} frame={frame} onSeek={onSeek}>
+      {marks}
+    </Lane>
+  );
+  return (
+    <section className="timeline" aria-label="Event timeline">
+      {lane(
+        "Behaviour events",
+        events?.map((event) => {
+          const confidence = `confidence ${event.confidence.toFixed(2)}`;
+          return {
+            ...event,
+            className: `event ${event.label}${event.low_confidence ? " low" : ""}`,
+            label: `${event.label}, ${frameSpan(event.first_frame, event.last_frame, fps)}, ${confidence}${event.low_confidence ? " (low)" : ""}`,
+            title: `${event.label} (${confidence}, ${event.source}): ${event.rationale}`,
+          };
+        }) ?? null,
+        "not judged yet: the run has not reached the behaviours stage",
+      )}
+      {lane(
+        "Exclusions",
+        exclusions?.map((exclusion) => ({
+          ...exclusion,
+          className: `exclusion ${exclusion.scope}`,
+          label: `excluded: ${exclusion.scope === "trial" ? "whole trial" : "window"}, ${frameSpan(exclusion.first_frame, exclusion.last_frame, fps)}`,
+          title: `${exclusion.source}: ${exclusion.reason}`,
+        })) ?? null,
+        "no QC yet: the run has not reached the QC stage",
+      )}
+    </section>
+  );
+}
+
 /** Frames `first` to `last` (inclusive) as a stretch of the bar, in percent of its width. */
-function place(first: number, last: number, nFrames: number) {
+function spanStyle(first: number, last: number, nFrames: number) {
   return {
     left: `${String((first / nFrames) * 100)}%`,
     width: `${String(((last - first + 1) / nFrames) * 100)}%`,
   };
 }
 
-/** The trial's frames as a bar per lane: each judged rear candidate, and each exclusion. A
- * click seeks the video to the window's first frame. */
-export function Timeline({ events, exclusions, nFrames, fps, frame, onSeek }: TimelineProps) {
-  const playhead = (
-    <i className="playhead" style={{ left: `${String(((frame + 0.5) / nFrames) * 100)}%` }} />
-  );
+function Lane({
+  name,
+  missing,
+  nFrames,
+  frame,
+  onSeek,
+  children: marks,
+}: {
+  name: string;
+  /** Said instead of the bar when the lane's artifact is not written yet. */
+  missing: string;
+  nFrames: number;
+  frame: number;
+  onSeek: (frame: number) => void;
+  children: Mark[] | null;
+}): ReactNode {
   return (
-    <section className="timeline" aria-label="Event timeline">
-      <div className="lane">
-        <span className="lane-name">Rear candidates</span>
-        {events ? (
-          <div className="bar">
-            {events.map((e) => {
-              const span = frameSpan(e.first_frame, e.last_frame, fps);
-              const confidence = `confidence ${e.confidence.toFixed(2)}`;
-              return (
-                <button
-                  key={e.first_frame}
-                  type="button"
-                  className={`event ${e.label}${e.low_confidence ? " low" : ""}`}
-                  style={place(e.first_frame, e.last_frame, nFrames)}
-                  aria-label={`${e.label}, ${span}, ${confidence}${e.low_confidence ? " (low)" : ""}`}
-                  title={`${e.label} (${confidence}, ${e.source}): ${e.rationale}`}
-                  onClick={() => {
-                    onSeek(e.first_frame);
-                  }}
-                />
-              );
-            })}
-            {playhead}
-          </div>
-        ) : (
-          <span className="missing">
-            not judged yet: the run has not reached the behaviours stage
-          </span>
-        )}
-      </div>
-      <div className="lane">
-        <span className="lane-name">Exclusions</span>
-        {exclusions ? (
-          <div className="bar">
-            {exclusions.map((x) => (
-              <button
-                key={`${x.scope}-${String(x.first_frame)}`}
-                type="button"
-                className={`exclusion ${x.scope}`}
-                style={place(x.first_frame, x.last_frame, nFrames)}
-                aria-label={`excluded, ${frameSpan(x.first_frame, x.last_frame, fps)}`}
-                title={`${x.source}: ${x.reason}`}
-                onClick={() => {
-                  onSeek(x.first_frame);
-                }}
-              />
-            ))}
-            {playhead}
-          </div>
-        ) : (
-          <span className="missing">no QC yet: the run has not reached the QC stage</span>
-        )}
-      </div>
-    </section>
+    <div className="lane">
+      <span className="lane-name">{name}</span>
+      {marks ? (
+        <div className="bar">
+          {marks.map((mark) => (
+            <button
+              key={windowKey(mark)}
+              type="button"
+              className={mark.className}
+              style={spanStyle(mark.first_frame, mark.last_frame, nFrames)}
+              aria-label={mark.label}
+              title={mark.title}
+              onClick={() => {
+                onSeek(mark.first_frame);
+              }}
+            />
+          ))}
+          <i className="playhead" style={{ left: `${String(((frame + 0.5) / nFrames) * 100)}%` }} />
+        </div>
+      ) : (
+        <span className="missing">{missing}</span>
+      )}
+    </div>
   );
 }
