@@ -24,8 +24,7 @@ describe("decodeMask", () => {
 
   it("decodes long runs and repeated counts (delta-coded)", () => {
     // 60×80: rows 10–49, cols 5–69 set, plus pixel (0, 0).
-    const rle =
-      "01e9W1oF" + "0".repeat(127) + "^b0";
+    const rle = "01e9W1oF" + "0".repeat(127) + "^b0";
     const mask = decodeMask(rle, 60, 80);
     expect(mask.reduce((a, v) => a + v, 0)).toBe(2601);
     expect(mask[0]).toBe(1);

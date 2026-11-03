@@ -19,7 +19,7 @@ describe("metricRows", () => {
       { label: "Centre time", value: "42.4", unit: "s", config: "measure v4" },
       { label: "Centre entries", value: "17", unit: "entries", config: "measure v4" },
       { label: "Thigmotaxis", value: "0.81", unit: "fraction", config: "measure v4" },
-      { label: "Immobility", value: "not computed", unit: "s", config: "measure v4" },
+      { label: "Immobility", value: null, unit: "s", config: "measure v4" },
     ]);
   });
 });

@@ -3,6 +3,7 @@
  * tail of its path. The canvas has the normalised video's pixel size, so artifact pixel
  * coordinates are canvas coordinates; CSS scales both together.
  */
+import type { Point } from "./api";
 import { decodeMask } from "./rle";
 
 export interface Position {
@@ -10,7 +11,7 @@ export interface Position {
   y: number;
 }
 
-export interface TrailPoint extends Position {
+export interface TailPoint extends Position {
   /** 1 for the oldest point kept, 0 for the current frame. */
   age: number;
 }
@@ -19,13 +20,13 @@ export interface TrailPoint extends Position {
  * The path over the last `tailFrames` frames up to `current`, as polylines: a gap (null)
  * ends one and the next detection starts another, so missing data is never drawn as motion.
  */
-export function trail(
+export function pathTail(
   positions: readonly (Position | null)[],
   current: number,
   tailFrames: number,
-): TrailPoint[][] {
-  const lines: TrailPoint[][] = [];
-  let line: TrailPoint[] = [];
+): TailPoint[][] {
+  const lines: TailPoint[][] = [];
+  let line: TailPoint[] = [];
   const span = Math.max(tailFrames - 1, 1);
   for (let i = Math.max(current - tailFrames + 1, 0); i <= current; i++) {
     const pos = positions[i];
@@ -44,12 +45,12 @@ export const COLOURS = {
   floor: "rgba(80, 160, 255, 0.9)",
   centre: "rgba(255, 200, 60, 0.9)",
   mask: [255, 60, 120, 110] as const,
-  trail: "255, 255, 255",
+  pathTail: "255, 255, 255",
 };
 
 export function drawPolygon(
   ctx: CanvasRenderingContext2D,
-  polygon: readonly (readonly [number, number])[],
+  polygon: readonly Point[],
   colour: string,
 ): void {
   if (!polygon.length) return;
@@ -64,7 +65,7 @@ export function drawPolygon(
   ctx.stroke();
 }
 
-export function drawTrail(ctx: CanvasRenderingContext2D, lines: TrailPoint[][]): void {
+export function drawPathTail(ctx: CanvasRenderingContext2D, lines: TailPoint[][]): void {
   ctx.lineWidth = 3;
   ctx.lineCap = "round";
   for (const line of lines) {
@@ -72,7 +73,7 @@ export function drawTrail(ctx: CanvasRenderingContext2D, lines: TrailPoint[][]):
       const a = line[i - 1];
       const b = line[i];
       if (!a || !b) continue;
-      ctx.strokeStyle = `rgba(${COLOURS.trail}, ${(1 - b.age).toFixed(3)})`;
+      ctx.strokeStyle = `rgba(${COLOURS.pathTail}, ${(1 - b.age).toFixed(3)})`;
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);
       ctx.lineTo(b.x, b.y);

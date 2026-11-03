@@ -449,7 +449,13 @@ the demo and write-up, the same way PaedScale published its validation table.
     Nov 3 against a synthetic run whose video shows a disc on the tracked path: within 1 px on
     every presented frame of playback.
   - The overlay decodes each frame's COCO RLE mask in the browser and draws the zones and the
-    last 10 s of the path; a gap breaks the path, never bridged.
+    last 10 s of the path; a gap breaks the path, never bridged. The path is the raw tracked
+    centroids, not the median-filtered, gap-bridged path the measure stage computes metrics
+    from, so it can show jitter and breaks the metrics never saw.
+  - Missing data stays visible: a run's later artifacts load only once the run view lists
+    them, and the viewer says which are missing ("no zones yet", "not tracked yet", "no
+    metrics yet") instead of failing. The metric units copy `METRIC_UNITS` by hand until the
+    API serves them.
 - **Deploy:** API on Render or Modal (CPU). SAM on Modal GPU if self-hosted. Static frontend.
   Precomputed demo runs ship with the app so the demo never waits on a cold GPU.
 

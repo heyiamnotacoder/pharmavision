@@ -3,6 +3,7 @@
  * Pydantic models in `artifacts.py`, keeping only the fields the frontend reads.
  */
 
+/** A pixel position in the normalised video, as `measure.geometry.Point`. */
 export type Point = [number, number];
 
 export type JobStatus = "queued" | "running" | "awaiting zone confirmation" | "done" | "failed";
@@ -10,29 +11,25 @@ export type JobStatus = "queued" | "running" | "awaiting zone confirmation" | "d
 export interface RunView {
   run_id: string;
   status: JobStatus;
-  stage: string | null;
   error: string | null;
   read_only: boolean;
   stages_done: string[];
-  artifacts: Record<string, string>;
+  /** The URL serving each artifact the run has written so far, by name. */
+  artifacts: Partial<Record<"manifest" | "video" | "arena" | "track" | "metrics", string>>;
 }
 
 export interface Manifest {
-  run_id: string;
-  code_version: string;
   measure: { version: number };
-  video: { width: number; height: number; fps: number; duration_s: number; n_frames: number };
+  video: { width: number; height: number; fps: number; n_frames: number };
 }
 
 export interface Arena {
   floor_px: Point[];
   centre_px: Point[];
-  px_per_cm: number;
   confirmed: boolean;
 }
 
 export interface TrackFrame {
-  frame_index: number;
   detected: boolean;
   x_px: number | null;
   y_px: number | null;
@@ -40,6 +37,8 @@ export interface TrackFrame {
 }
 
 export interface Track {
+  /** One record per frame: the backend's `Track` validator holds `frame_index` to the
+   * record's position, so `frames[i]` is frame i. */
   frames: TrackFrame[];
 }
 
@@ -55,11 +54,12 @@ export interface Metrics {
 /** The API's root: `/api` goes through the Vite dev proxy; a deploy can point elsewhere. */
 const API_BASE: string = (import.meta.env.VITE_API_BASE as string | undefined) ?? "/api";
 
+/** A path the API gave (such as a `RunView.artifacts` URL), as this page reaches it. */
 export function apiUrl(path: string): string {
   return `${API_BASE}${path}`;
 }
 
-async function getJson<T>(path: string): Promise<T> {
+export async function getJson<T>(path: string): Promise<T> {
   const response = await fetch(apiUrl(path));
   if (!response.ok) throw new Error(`GET ${path}: ${String(response.status)}`);
   return (await response.json()) as T;
@@ -68,9 +68,4 @@ async function getJson<T>(path: string): Promise<T> {
 export const api = {
   runs: () => getJson<RunView[]>("/runs"),
   run: (id: string) => getJson<RunView>(`/runs/${encodeURIComponent(id)}`),
-  manifest: (id: string) => getJson<Manifest>(`/runs/${encodeURIComponent(id)}/artifacts/manifest`),
-  arena: (id: string) => getJson<Arena>(`/runs/${encodeURIComponent(id)}/artifacts/arena`),
-  track: (id: string) => getJson<Track>(`/runs/${encodeURIComponent(id)}/artifacts/track`),
-  metrics: (id: string) => getJson<Metrics>(`/runs/${encodeURIComponent(id)}/artifacts/metrics`),
-  videoUrl: (id: string) => apiUrl(`/runs/${encodeURIComponent(id)}/video`),
 };

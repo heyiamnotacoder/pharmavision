@@ -2,8 +2,9 @@ import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { MetricsTable } from "./MetricsTable";
 
+// Values, units and versions are `metricRows`' job (metrics.test.ts); this covers the table.
 describe("MetricsTable", () => {
-  it("shows each metric with its value, unit and configuration version", () => {
+  it("lays each metric out as a row under the four headers, marking a missing value", () => {
     render(
       <MetricsTable
         metrics={{
@@ -18,20 +19,13 @@ describe("MetricsTable", () => {
       />,
     );
     const table = screen.getByRole("table", { name: "Open field metrics" });
-    expect(within(table).getAllByRole("columnheader").map((th) => th.textContent)).toEqual([
-      "Metric",
-      "Value",
-      "Unit",
-      "Configuration",
-    ]);
-    const distance = screen.getByRole("row", { name: /Distance travelled/ });
-    expect(within(distance).getAllByRole("cell").map((td) => td.textContent)).toEqual([
-      "Distance travelled",
-      "1200.0",
-      "cm",
-      "measure v4",
-    ]);
+    expect(
+      within(table)
+        .getAllByRole("columnheader")
+        .map((th) => th.textContent),
+    ).toEqual(["Metric", "Value", "Unit", "Configuration"]);
+    expect(within(table).getAllByRole("row")).toHaveLength(7);
     const immobility = screen.getByRole("row", { name: /Immobility/ });
-    expect(within(immobility).getByText("not computed")).toBeInTheDocument();
+    expect(within(immobility).getByText("not computed")).toHaveClass("missing");
   });
 });

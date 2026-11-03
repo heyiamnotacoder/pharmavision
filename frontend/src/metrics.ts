@@ -2,14 +2,17 @@ import type { Metrics } from "./api";
 
 export interface MetricRow {
   label: string;
-  /** Formatted; "not computed" for a metric the measure stage could not compute (None). */
-  value: string;
+  /** Formatted; null for a metric the measure stage could not compute (never shown as 0). */
+  value: string | null;
   unit: string;
   /** The measure settings that produced the value (`manifest.measure.version`). */
   config: string;
 }
 
-/** Display order, labels, units (as `METRIC_UNITS` in `artifacts.py`) and decimals. */
+/**
+ * Display order, labels, units and decimals. The units copy `METRIC_UNITS` in `artifacts.py`
+ * by hand: the API does not serve them yet, so a new or renamed metric changes both.
+ */
 const METRICS: readonly {
   key: keyof Metrics;
   label: string;
@@ -29,7 +32,7 @@ export function metricRows(metrics: Metrics, measureVersion: number): MetricRow[
     const value = metrics[key];
     return {
       label,
-      value: value === null ? "not computed" : value.toFixed(decimals),
+      value: value === null ? null : value.toFixed(decimals),
       unit,
       config: `measure v${String(measureVersion)}`,
     };

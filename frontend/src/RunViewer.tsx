@@ -1,33 +1,50 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, type Arena, type Manifest, type Metrics, type Track } from "./api";
+import {
+  api,
+  apiUrl,
+  getJson,
+  type Arena,
+  type Manifest,
+  type Metrics,
+  type RunView,
+  type Track,
+} from "./api";
 import { frameAt } from "./frames";
-import { COLOURS, drawPolygon, drawTrail, maskImage, trail, type Position } from "./overlay";
+import { COLOURS, drawPolygon, drawPathTail, maskImage, pathTail, type Position } from "./overlay";
 import { MetricsTable } from "./MetricsTable";
 
 /** How much of the path the overlay keeps behind the animal. */
 const TAIL_SECONDS = 10;
 
+/** A run that has been ingested: its manifest and video exist. Each later artifact is null
+ * until its stage has run, and the viewer says so instead of failing. */
 interface RunData {
   manifest: Manifest;
-  arena: Arena;
+  videoUrl: string;
+  arena: Arena | null;
   track: Track | null;
   metrics: Metrics | null;
 }
 
-/** An artifact a run has not written yet (its stage hasn't run) reads as null. */
-async function optional<T>(name: string, artifacts: Record<string, string>, load: () => Promise<T>) {
-  return name in artifacts ? load() : null;
+class NotIngestedError extends Error {}
+
+/** The artifact at the URL the run view gives, or null if the run has not written it. */
+async function optional<T>(url: string | undefined): Promise<T | null> {
+  return url === undefined ? null : getJson<T>(url);
 }
 
 async function loadRun(runId: string): Promise<RunData> {
-  const view = await api.run(runId);
+  const { artifacts }: RunView = await api.run(runId);
+  if (artifacts.manifest === undefined || artifacts.video === undefined) {
+    throw new NotIngestedError(`run ${runId} has not been ingested yet`);
+  }
   const [manifest, arena, track, metrics] = await Promise.all([
-    api.manifest(runId),
-    api.arena(runId),
-    optional("track", view.artifacts, () => api.track(runId)),
-    optional("metrics", view.artifacts, () => api.metrics(runId)),
+    getJson<Manifest>(artifacts.manifest),
+    optional<Arena>(artifacts.arena),
+    optional<Track>(artifacts.track),
+    optional<Metrics>(artifacts.metrics),
   ]);
-  return { manifest, arena, track, metrics };
+  return { manifest, videoUrl: apiUrl(artifacts.video), arena, track, metrics };
 }
 
 /** Mount with `key={runId}`: its state belongs to one run. */
@@ -42,7 +59,7 @@ export function RunViewer({ runId }: { runId: string }) {
         if (live) setData(d);
       },
       (e: unknown) => {
-        if (live) setError(String(e));
+        if (live) setError(e instanceof NotIngestedError ? e.message : String(e));
       },
     );
     return () => {
@@ -50,12 +67,17 @@ export function RunViewer({ runId }: { runId: string }) {
     };
   }, [runId]);
 
-  if (error) return <p className="error">Could not load run {runId}: {error}</p>;
+  if (error)
+    return (
+      <p className="error">
+        Could not show run {runId}: {error}
+      </p>
+    );
   if (!data) return <p>Loading run {runId}…</p>;
   return (
     <section className="viewer">
       <h2>Run {runId}</h2>
-      <OverlayPlayer runId={runId} {...data} />
+      <OverlayPlayer {...data} />
       {data.metrics ? (
         <MetricsTable metrics={data.metrics} measureVersion={data.manifest.measure.version} />
       ) : (
@@ -65,22 +87,13 @@ export function RunViewer({ runId }: { runId: string }) {
   );
 }
 
-function OverlayPlayer({
-  runId,
-  manifest,
-  arena,
-  track,
-}: {
-  runId: string;
-  manifest: Manifest;
-  arena: Arena;
-  track: Track | null;
-}) {
+function OverlayPlayer({ manifest, videoUrl, arena, track }: Omit<RunData, "metrics">) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [frame, setFrame] = useState(0);
   const { width, height, fps, n_frames: nFrames } = manifest.video;
 
+  // Indexed by frame: `Track.frames[i]` is frame i (see `Track` in api.ts).
   const positions = useMemo<(Position | null)[]>(
     () =>
       track?.frames.map((f) =>
@@ -105,9 +118,11 @@ function OverlayPlayer({
       ctx.clearRect(0, 0, width, height);
       const record = track?.frames[index];
       if (record?.mask_rle) ctx.putImageData(maskImage(record.mask_rle, width, height), 0, 0);
-      drawPolygon(ctx, arena.floor_px, COLOURS.floor);
-      drawPolygon(ctx, arena.centre_px, COLOURS.centre);
-      drawTrail(ctx, trail(positions, index, tailFrames));
+      if (arena) {
+        drawPolygon(ctx, arena.floor_px, COLOURS.floor);
+        drawPolygon(ctx, arena.centre_px, COLOURS.centre);
+      }
+      drawPathTail(ctx, pathTail(positions, index, tailFrames));
       setFrame(index);
     };
     let handle = 0;
@@ -131,7 +146,7 @@ function OverlayPlayer({
   return (
     <figure className="player">
       <div className="stage" style={{ aspectRatio: `${String(width)} / ${String(height)}` }}>
-        <video ref={videoRef} src={api.videoUrl(runId)} controls muted playsInline />
+        <video ref={videoRef} src={videoUrl} controls muted playsInline />
         <canvas ref={canvasRef} width={width} height={height} aria-label="Tracking overlay" />
       </div>
       <figcaption>
@@ -139,14 +154,34 @@ function OverlayPlayer({
           Frame {frame + 1} / {nFrames}
         </span>
         {track ? (
-          record?.detected ? null : <span className="gap"> · animal not found (gap)</span>
+          record?.detected ? null : (
+            <span className="gap"> · animal not found (gap)</span>
+          )
         ) : (
           <span className="missing"> · not tracked yet</span>
         )}
-        {arena.confirmed ? null : <span className="missing"> · zones not confirmed</span>}
+        {!arena ? (
+          <span className="missing"> · no zones yet</span>
+        ) : arena.confirmed ? null : (
+          <span className="missing"> · zones not confirmed</span>
+        )}
         <span className="legend">
-          <i style={{ borderColor: COLOURS.floor }} /> floor <i style={{ borderColor: COLOURS.centre }} />{" "}
-          centre zone <i className="mask" /> mask <i className="tail" /> last {TAIL_SECONDS} s
+          <span>
+            <i style={{ borderColor: COLOURS.floor }} />
+            floor
+          </span>
+          <span>
+            <i style={{ borderColor: COLOURS.centre }} />
+            centre zone
+          </span>
+          <span>
+            <i className="mask" />
+            mask
+          </span>
+          <span title="Raw tracked centroids: the metrics use a smoothed path">
+            <i className="tail" />
+            path, last {TAIL_SECONDS} s (raw)
+          </span>
         </span>
       </figcaption>
     </figure>

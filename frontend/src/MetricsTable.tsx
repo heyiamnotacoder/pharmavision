@@ -22,7 +22,11 @@ export function MetricsTable({
         {metricRows(metrics, measureVersion).map((row) => (
           <tr key={row.label}>
             <td>{row.label}</td>
-            <td className={row.value === "not computed" ? "missing" : "number"}>{row.value}</td>
+            {row.value === null ? (
+              <td className="missing">not computed</td>
+            ) : (
+              <td className="number">{row.value}</td>
+            )}
             <td>{row.unit}</td>
             <td>{row.config}</td>
           </tr>

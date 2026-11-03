@@ -1,12 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, type RunView } from "./api";
+import { runFromHash } from "./route";
 import { RunViewer } from "./RunViewer";
-
-/** `#/runs/<id>` opens a run; anything else lists them. No router needed for two screens. */
-function runFromHash(hash: string): string | null {
-  const match = /^#\/runs\/(.+)$/.exec(hash);
-  return match?.[1] ? decodeURIComponent(match[1]) : null;
-}
 
 export function App() {
   const [runId, setRunId] = useState(() => runFromHash(window.location.hash));
