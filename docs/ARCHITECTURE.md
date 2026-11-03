@@ -245,7 +245,9 @@ purity.
     `clip_max_side_px` (480), mask outlined in green, cut by the same `stages/clips.py` as the
     behaviours clips. The prompt states the flag's kind, frames and reason and the hand
     sightings, and asks for `{verdict: keep | exclude_window | exclude_trial, reason}`, cached
-    under `<model>/qc-v1/<hash>`. It is told not to state numbers in its reason, but nothing
+    under `<model>/qc-v2/<hash>`. The prompt says every trial starts with a hand placing the
+    mouse and ends with one lifting it out, and that those are `exclude_window`: qc-v1 called
+    that handling `exclude_trial`, which excluded 7 of the 14 demo trials whole. It is told not to state numbers in its reason, but nothing
     enforces that yet: the report stage must run the number audit over every model-written
     reason it shows, not only over the agent's prose (the audit never takes a number inside a
     string as known, T8a). A flag

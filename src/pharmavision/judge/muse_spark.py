@@ -62,7 +62,7 @@ SCHEMA = {
 }
 FORMAT = {"type": "json_schema", "name": "rear_label", "schema": SCHEMA, "strict": True}
 
-REVIEW_PROMPT_VERSION = "qc-v1"
+REVIEW_PROMPT_VERSION = "qc-v2"
 """The QC review's request shape and wording: bump it when either changes."""
 
 REVIEW_PROMPT = """\
@@ -77,8 +77,10 @@ Decide what the flagged frames are worth for measuring the mouse's behaviour:
 - keep: the tracking is right and nothing disturbs the mouse (a reflection, a dropping, a brief
   tracking glitch).
 - exclude_window: leave the flagged frames out (a hand in the arena, the outline on something
-  that is not the mouse), and keep the rest of the trial.
-- exclude_trial: the whole trial is unusable (the mouse is handled or lifted out, escapes, or
+  that is not the mouse), and keep the rest of the trial. Every trial starts with a hand placing
+  the mouse in the arena and ends with a hand lifting it out: that is this verdict, not
+  exclude_trial.
+- exclude_trial: the whole trial is unusable (the mouse is handled during the test, escapes, or
   the arena is disturbed).
 Answer with the verdict and one sentence of reason. Do not state any numbers in the reason."""
 
