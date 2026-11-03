@@ -57,7 +57,7 @@ A window of frames where the animal may be rearing: its mask shrank and changed 
 _Avoid_: Rear, rearing event (for an unjudged window)
 
 **Rear score**:
-How likely a rear candidate holds a rear, from 0 to 1: a logistic over the candidate's mask features (duration, area drop, elongation change, speed, mask area), fitted on the train split's rater labels. Measured, so it belongs to the measure stage; Muse Spark's label is a second opinion beside it. Evidence per window only: it is never summed or thresholded into a rear count (ADR 0003).
+How likely a rear candidate holds a rear, from 0 to 1: a logistic over the candidate's mask features (duration, area drop, elongation change, speed, mask area), fitted on the train split's rater labels. Measured, so it belongs to the measure stage; Muse Spark's label is a second opinion beside it. Evidence per window only: the pipeline never sums or thresholds it into a rear count (ADR 0003); only the eval thresholds it, to measure how far such a count would be from the raters.
 _Avoid_: Rear probability (it is not calibrated per video), rear count
 
 **Behaviour event**:

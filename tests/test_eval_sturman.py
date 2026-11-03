@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from eval.sturman import LabelFileError, dlc_files
+from eval.sturman import LabelFileError, dlc_files, rater_rears
 
 HEADER = '"file";"Experimenter";"from";"to";"type";"ID";"DLCFile"\n'
 
@@ -49,3 +49,21 @@ def test_a_dlc_file_name_that_is_not_a_plain_file_name_is_refused(
 
     with pytest.raises(LabelFileError):
         dlc_files(path)
+
+
+def test_each_raters_rears_are_read_by_video_with_none_where_they_marked_none(
+    tmp_path: Path,
+) -> None:
+    path = labels(
+        tmp_path,
+        '"OFT_11_Jin.csv";"Jin";2.6;3.7;"Start/End";"OFT_11";"a.csv"',
+        '"OFT_11_OS.csv";"Oliver";4.8;6.5;"Supported";"OFT_11";"a.csv"',
+        '"OFT_11_OS.csv";"Oliver";1.0;1.5;"Unsupported";"OFT_11";"a.csv"',
+        '"OFT_11_OS.csv";"Oliver";9.0;9.5;"Grooming";"OFT_11";"a.csv"',
+        '"OFT_5_Jin.csv";"Jin";7.0;8.0;"Supported";"OFT_5";"b.csv"',
+    )
+
+    assert rater_rears(path) == {
+        "OFT_11": {"Jin": [], "Oliver": [(1.0, 1.5), (4.8, 6.5)]},
+        "OFT_5": {"Jin": [(7.0, 8.0)], "Oliver": []},
+    }

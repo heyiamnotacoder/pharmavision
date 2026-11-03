@@ -462,6 +462,39 @@ track:  plan printed → ask → per eval video:
   label file and one DLC file: the split matches, OFT_11's DLC is 15,253 frames at 25 fps, its
   body centre confident on 99.2% of them.
 
+**The report (T12b).** `python -m eval report`, laptop only (it reads the labels). It builds no
+segmenter and no judge, so it costs nothing and can be run again whenever the code changes.
+
+```
+report: eval/split.json ✓ → per eval video with a tracked run (eval/data/runs/<ID>):
+          track + confirmed arena → open_field_metrics (current MeasureSettings)   [measures]
+          rear candidates (s, score) vs each rater's rears → eval.rearing           [measures]
+        studies/*/report.json → shipped draft audited again vs tool outputs now     [measures]
+        tracking/<ID>.json + spend.jsonl
+        → eval/REPORT.md (committed) + eval/data/report.json (every number);
+          exits non-zero unless a study report exists and every one passes again
+```
+
+- **Rearing, per rater, beside the raters against each other:** per-video count ICC(2,1)
+  (Shrout & Fleiss) and event-level precision, recall and F1, pooled over the videos. Events
+  match one-to-one (the most pairs, by `linear_sum_assignment`), a candidate window and a rear
+  matching when they overlap or lie at most 0.5 s apart (`RearingSettings.tolerance_s`; the
+  gap between the intervals, not between onsets, so a long window can match a rear inside it). The bar: every rater's
+  agreement at least the lowest between two raters. Supported and unsupported rears both count
+  as rears (the label set is binary).
+- **Which count:** the pipeline makes none (ADR 0003). The eval counts the candidates scoring
+  ≥ 0.55 (`RearingSettings.count_threshold`, set on the train split's counts by
+  `spike.rear_scorer fit`), and every candidate beside it (report only).
+- **Number-audit pass rate:** each study's stored report, its last draft audited again against
+  the tables its tools return now, so a report gone stale fails. A report that can't be read,
+  or whose tables can't (no design, a run gone), counts as not passing; with no report, the
+  rate abstains and the command fails. Bar: 100%.
+- **Not yet measured:** Muse Spark's rear labels against the raters and the score on the eval
+  split (ADR 0003 point 3): it needs the behaviours stage on the eval videos, which is new
+  spend. Supported vs unsupported: the label set is binary.
+- **Abstain:** an eval video with no tracked run is left out and listed; a value that is
+  undefined (no spread, no events) shows as "—".
+
 ## Application layer
 
 - **Backend:** FastAPI (`api/`, T9a), served by `python -m pharmavision serve`.

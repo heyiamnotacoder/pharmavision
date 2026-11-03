@@ -1,10 +1,15 @@
-"""The eval harness, tracking part (T12a). Laptop only: `track` calls SAM 3.1 with the
-MODEL_API_KEY in .env.
+"""The eval harness. Laptop only: `track` calls SAM 3.1 with the MODEL_API_KEY in .env, and
+every command reads the Sturman labels.
 
 Usage:
   uv run python -m eval fetch          # labels, DLC output and the 14 eval videos (~1.8 GB)
   uv run python -m eval plan           # the projected spend of `track`, per video
   uv run python -m eval track [--yes]  # print the projection, ask, then track and compare
+  uv run python -m eval report         # eval/REPORT.md from stored results; no model call
+
+`report` reads the tracked runs, the tracking results and the study reports (`studies/`, their
+runs in `runs/`; `--studies`, `--runs-dir`) and exits non-zero unless there is a study report
+and every one passes the number audit again.
 
 Every command first checks that no label file can be committed (`eval.guard`) and, once the
 labels are fetched, that `eval/split.json` is the seeded split of the labelled videos. Results:
@@ -32,6 +37,7 @@ from .harness import (
     spent_by_video,
     summarise,
 )
+from .report import REPORT_MD, build_report, write_report
 from .spend import MeteredTransport, VideoPlan, format_projection, project
 from .split import Split, check_split, load_split
 from .sturman import LABELS, dlc_files, fetch_dlc, fetch_labels, fetch_video, video_path
@@ -113,15 +119,38 @@ def track(yes: bool, paths: Paths) -> TrackingSummary:
     return summary
 
 
+def report(studies: Path, runs_dir: Path, out: Path, paths: Paths) -> None:
+    """Build and write the report. No segmenter or judge is made here, so nothing is billed."""
+    split, _ = checked_split()
+    made = build_report(split, paths, LABELS, studies, runs_dir)
+    write_report(made, out, paths)
+    audit = made.audit
+    print(f"wrote {out} and {paths.report_json}")
+    if made.rearing_missing:
+        print(f"rearing: no tracked run for {made.rearing_missing}; run `python -m eval track`")
+    if not audit.studies:
+        raise SystemExit(f"number audit: no study report under {studies}; the bar is not shown")
+    if not audit.met:
+        failing = [s.study_id for s in audit.studies if s.passed is not True]
+        raise SystemExit(f"number audit: {audit.passed} of {audit.total} pass; failing {failing}")
+
+
 def main(argv: list[str]) -> None:
     parser = argparse.ArgumentParser(
-        prog="python -m eval", description="The eval harness, tracking part (T12a)."
+        prog="python -m eval",
+        description="The eval harness: tracking (T12a), rearing and the report (T12b).",
     )
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("fetch", help="fetch the labels, DLC output and eval videos")
     commands.add_parser("plan", help="print the projected spend of `track`")
     track_parser = commands.add_parser("track", help="track the eval videos and compare with DLC")
     track_parser.add_argument("--yes", action="store_true", help="run without asking")
+    report_parser = commands.add_parser(
+        "report", help="write eval/REPORT.md from stored results, calling no model"
+    )
+    report_parser.add_argument("--studies", type=Path, default=REPO / "studies")
+    report_parser.add_argument("--runs-dir", type=Path, default=REPO / "runs")
+    report_parser.add_argument("--out", type=Path, default=REPORT_MD)
     args = parser.parse_args(argv)
 
     check_labels_untracked(REPO)
@@ -136,6 +165,8 @@ def main(argv: list[str]) -> None:
             print(f"{len(summary.videos)} videos compared, ${summary.spent_usd:.2f} spent")
             if summary.missing:
                 raise SystemExit(f"no tracking result for {summary.missing}")
+        case "report":
+            report(args.studies, args.runs_dir, args.out, paths)
         case _:
             parser.error(f"unknown command {args.command}")
 

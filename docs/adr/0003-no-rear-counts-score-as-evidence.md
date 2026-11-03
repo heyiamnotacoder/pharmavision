@@ -43,8 +43,8 @@ We decided (Oct 31):
 
 ## Consequences
 
-- The scorer has no threshold: a count threshold (0.55) exists only in the spike, to measure
-  count agreement.
+- The scorer has no threshold: a count threshold (0.55) exists only in the spike and the eval
+  harness (`eval.rearing.RearingSettings`), to measure count agreement.
 - `metrics.json` from settings before v4 has no features or scores and no longer loads; re-run
   the measure stage on such a run folder (it costs no API call).
 - The submitted application (docs/application.md) promises rearing counts that agree with the
