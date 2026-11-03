@@ -26,6 +26,10 @@ DLC_URL = _DLCANALYZER + "/data/OFT/Output_DLC/{name}"
 VIDEO_URL = "https://zenodo.org/records/3608658/files/{video_id}.mp4?download=1"
 
 
+REAR_TYPES = ("Supported", "Unsupported")
+"""The label file's rear rows; the others are grooming, jumping and each rater's start/end."""
+
+
 class LabelFileError(ValueError):
     """The label file does not map each video to one DLC output file."""
 
@@ -45,6 +49,25 @@ def dlc_files(labels: Path) -> dict[str, str]:
         if not name or Path(name).name != name or name in {".", ".."}:
             raise LabelFileError(f"{video_id}: {name!r} is not a plain file name")
         out[video_id] = name
+    return out
+
+
+def rater_rears(labels: Path) -> dict[str, dict[str, list[tuple[float, float]]]]:
+    """Each video's rears (from, to, in seconds; supported or unsupported) by rater, in time
+    order. Every rater in the file has a list for every video, empty where they marked no
+    rear: each Sturman rater labelled every open-field video."""
+    with labels.open(newline="") as f:
+        rows = list(csv.DictReader(f, delimiter=";"))
+    raters = sorted({row["Experimenter"] for row in rows})
+    out: dict[str, dict[str, list[tuple[float, float]]]] = {
+        video_id: {rater: [] for rater in raters} for video_id in sorted({r["ID"] for r in rows})
+    }
+    for row in rows:
+        if row["type"] in REAR_TYPES:
+            out[row["ID"]][row["Experimenter"]].append((float(row["from"]), float(row["to"])))
+    for by_rater in out.values():
+        for rears in by_rater.values():
+            rears.sort()
     return out
 
 

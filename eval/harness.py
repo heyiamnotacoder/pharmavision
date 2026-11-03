@@ -12,13 +12,15 @@ from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict
 
-from pharmavision.artifacts import RunFolder
+from pharmavision.artifacts import MeasureSettings, RunFolder
 from pharmavision.judge import Clip, ClipJudgement, FlaggedWindow, ReportBrief, WindowVerdict
+from pharmavision.measure.open_field import open_field_metrics
 from pharmavision.pipeline import Stage, confirm_arena, run_stage, start_run
 from pharmavision.segmenter import Segmenter
 from pharmavision.templates import OPEN_FIELD, TestTemplate
 
 from .dlc import read_dlc
+from .rearing import Candidate, VideoRears, Window
 from .spend import Call, ModelSpend, by_model, total_usd
 from .sturman import DATA
 from .tracking import TrackingComparison, TrackingSettings, VideoMapping, compare_tracking
@@ -49,6 +51,11 @@ class Paths:
 
     def result(self, video_id: str) -> Path:
         return self.results / f"{video_id}.json"
+
+    @property
+    def report_json(self) -> Path:
+        """Every number behind `eval/REPORT.md`, as `python -m eval report` last made it."""
+        return self.root / "report.json"
 
     @property
     def spend_log(self) -> Path:
@@ -157,6 +164,37 @@ def spent_by_video(paths: Paths) -> dict[str, float]:
         entry = SpendEntry.model_validate_json(line)
         spent[entry.video_id] = spent.get(entry.video_id, 0.0) + entry.usd
     return spent
+
+
+def video_rears(
+    video_id: str,
+    paths: Paths,
+    raters: dict[str, list[Window]],
+    settings: MeasureSettings | None = None,
+) -> VideoRears | None:
+    """The rear candidates of the video's tracked run, in seconds, measured afresh with
+    `settings` (the current defaults by default: the eval judges today's scorer, whatever the
+    run was made with), beside the raters' rears. No model is called. None when the video has
+    no tracked run: its rows abstain."""
+    run = RunFolder(paths.runs / video_id)
+    if not run.has("track"):
+        return None
+    video = run.manifest().video
+    metrics = open_field_metrics(
+        run.track(), run.confirmed_arena(), video, settings or MeasureSettings()
+    )
+    return VideoRears(
+        video_id=video_id,
+        candidates=[
+            Candidate(
+                start_s=c.first_frame / video.fps,
+                end_s=(c.last_frame + 1) / video.fps,
+                score=c.score,
+            )
+            for c in metrics.rear_candidates
+        ],
+        raters=raters,
+    )
 
 
 def _tracked_run(
