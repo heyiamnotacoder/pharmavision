@@ -7,13 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from eval.harness import Paths, evaluate_video, summarise
+from eval.harness import ArenaNotFoundError, Paths, evaluate_video, summarise, video_rears
 from eval.spend import Call, Usage
-from pharmavision.pipeline import ArenaNotFoundError
 from pharmavision.segmenter.synthetic import SyntheticSegmenter
 
 from .dlc_csv import write_dlc
-from .scenes import FLOOR, N_FRAMES, TEMPLATE
+from .scenes import FLOOR, N_FRAMES, REAR, TEMPLATE, rears_in, walk_stop_walk
 from .videos import make_video
 
 SOURCE_FPS = 25
@@ -124,3 +123,24 @@ def test_a_finished_video_is_not_run_again(paths: Paths, video: Path, dlc_csv: P
     assert again.run_id == first.run_id
     assert again.tracking == first.tracking
     assert len(list(paths.runs.iterdir())) == 1
+
+
+def test_a_tracked_eval_run_gives_its_rear_candidates_in_seconds_beside_the_raters_rears(
+    paths: Paths, video: Path, dlc_csv: Path
+) -> None:
+    # Still for frames 15-44, rearing in frames 25-39: one candidate, 25/15 s to 40/15 s.
+    segmenter = SyntheticSegmenter(floor=FLOOR, trajectory=walk_stop_walk, body=rears_in(REAR))
+    evaluate_video("OFT_11", video, dlc_csv, segmenter, FakeMeter(), paths, TEMPLATE)
+    raters = {"Jin": [(1.7, 2.6)], "Oliver": []}
+
+    rears = video_rears("OFT_11", paths, raters)
+
+    assert rears is not None
+    [candidate] = rears.candidates
+    assert (candidate.start_s, candidate.end_s) == (pytest.approx(25 / 15), pytest.approx(40 / 15))
+    assert 0 <= candidate.score <= 1
+    assert rears.raters == raters
+
+
+def test_an_eval_video_never_tracked_has_no_rears_to_compare(paths: Paths) -> None:
+    assert video_rears("OFT_12", paths, {"Jin": []}) is None

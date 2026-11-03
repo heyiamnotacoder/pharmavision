@@ -71,8 +71,12 @@ strict = [
   "src/pharmavision/stats",
   "src/pharmavision/audit",
   "src/pharmavision/arrive.py",
-  # The eval's numbers (tracking against DLC, spend) feed eval/REPORT.md and the README.
+  # The eval's numbers (tracking against DLC, rearing, the audit rate, spend) feed
+  # eval/REPORT.md and the README.
   "eval/dlc.py",
+  "eval/audit_rate.py",
+  "eval/rearing.py",
+  "eval/report.py",
   "eval/spend.py",
   "eval/tracking.py",
 ]
