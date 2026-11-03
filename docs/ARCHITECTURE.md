@@ -425,7 +425,7 @@ plan:   eval/split.json ✓ → per-video projected SAM 3.1 spend, total
 track:  plan printed → ask → per eval video:
           ingest → arena (floor prompts in turn, auto-confirmed) → track      [sees]
           our centroid vs DLC body centre → tracking/<ID>.json               [measures]
-          live calls' usage and $ → spend.jsonl (also when the arena fails)
+          live calls' usage and $ → spend.jsonl (also when no floor is found)
         → tracking/summary.json; exits non-zero if any eval video has no result
 ```
 
@@ -433,6 +433,9 @@ track:  plan printed → ask → per eval video:
   tracks nothing there or named like a DLCAnalyzer file (`AllLabData…`, `…DeepCut…`,
   `OFT_<n>_<rater>…`); a test runs the same check in CI. `eval.split` recomputes the seeded draw
   from the label file's IDs and refuses if `split.json` differs; nothing rewrites it.
+- **No floor:** the arena stage leaves an empty arena for the scientist to draw (T10); the
+  eval can't draw, so it deletes that attempt's run folder and tries the next floor prompt.
+  When none finds a floor, `track` prints the video as skipped and it reads as missing.
 - **Videos by ID:** a DLC file is named by its recording (`3_01_A_…DeepCut….csv` holds OFT_11),
   so it is found through the label rows' `DLCFile` column, never by the number in a name.
 - **Matching frames:** our frame i meets DLC frame floor((i + 0.5) × 25 / 15), the source
