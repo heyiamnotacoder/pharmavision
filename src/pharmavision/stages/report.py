@@ -104,7 +104,8 @@ def _load(study: StudyFolder, runs_dir: Path) -> _Study:
     if differing:
         raise StudyNotReadyError(
             f"trials recorded or judged differently (template but the floor prompt, video, "
-            f"behaviour settings or models):{', '.join(differing)} against {design.trials[0].blinding_code}"
+            f"behaviour settings or models): {', '.join(differing)} "
+            f"against {design.trials[0].blinding_code}"
         )
     return _Study(design, trials, stats, runs, first)
 
