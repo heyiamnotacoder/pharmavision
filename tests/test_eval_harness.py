@@ -7,9 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from eval.harness import Paths, evaluate_video, summarise
+from eval.harness import ArenaNotFoundError, Paths, evaluate_video, summarise
 from eval.spend import Call, Usage
-from pharmavision.pipeline import ArenaNotFoundError
 from pharmavision.segmenter.synthetic import SyntheticSegmenter
 
 from .dlc_csv import write_dlc

@@ -21,11 +21,17 @@ import cv2
 
 from pharmavision.artifacts import IngestSettings
 from pharmavision.model_api import OpenAiTransport
-from pharmavision.pipeline import ArenaNotFoundError
 from pharmavision.segmenter.meta_api import MetaApiSegmenter, MetaApiSettings
 
 from .guard import check_labels_untracked
-from .harness import Paths, TrackingSummary, evaluate_video, spent_by_video, summarise
+from .harness import (
+    ArenaNotFoundError,
+    Paths,
+    TrackingSummary,
+    evaluate_video,
+    spent_by_video,
+    summarise,
+)
 from .spend import MeteredTransport, VideoPlan, format_projection, project
 from .split import Split, check_split, load_split
 from .sturman import LABELS, dlc_files, fetch_dlc, fetch_labels, fetch_video, video_path

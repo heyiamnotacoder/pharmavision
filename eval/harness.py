@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict
 
 from pharmavision.artifacts import RunFolder
 from pharmavision.judge import Clip, ClipJudgement, FlaggedWindow, ReportBrief, WindowVerdict
-from pharmavision.pipeline import ArenaNotFoundError, Stage, confirm_arena, run_stage, start_run
+from pharmavision.pipeline import Stage, confirm_arena, run_stage, start_run
 from pharmavision.segmenter import Segmenter
 from pharmavision.templates import OPEN_FIELD, TestTemplate
 
@@ -26,6 +26,11 @@ from .tracking import TrackingComparison, TrackingSettings, VideoMapping, compar
 FLOOR_PROMPTS = ("square floor", "white floor", "open field arena", "floor", "box")
 """Tried in order until SAM 3.1 finds a floor: on the Sturman videos OFT_12 and OFT_52 took
 "white floor" and OFT_39 "floor" (spike, Oct 31). The template's own prompt goes first."""
+
+
+class ArenaNotFoundError(RuntimeError):
+    """SAM 3.1 found no floor with any of the floor prompts: the arena stage left an empty
+    arena, which the harness cannot confirm without a human drawing it."""
 
 
 @dataclass(frozen=True)
@@ -169,11 +174,10 @@ def _tracked_run(
     prompts = dict.fromkeys((template.floor_prompt, *FLOOR_PROMPTS))
     for prompt in prompts:
         attempt = template.model_copy(update={"floor_prompt": prompt})
-        try:
-            run = start_run(video, attempt, segmenter, runs_dir, run_id=video_id)
+        run = start_run(video, attempt, segmenter, runs_dir, run_id=video_id)
+        if run.arena().floor_px:
             break
-        except ArenaNotFoundError:
-            continue
+        shutil.rmtree(run.path)  # an empty arena: no floor for this prompt
     else:
         raise ArenaNotFoundError(f"{video_id}: no floor found with any of {list(prompts)}")
     confirm_arena(run)
