@@ -111,8 +111,10 @@ def _load(study: StudyFolder, runs_dir: Path) -> _Study:
 
 def _protocol(manifest: Manifest) -> tuple[object, ...]:
     """What the protocol tool reports from one manifest; the stats stage already checked that
-    the measure and QC settings agree."""
-    return (manifest.template, manifest.video.fps, manifest.behaviours, manifest.models)
+    the measure and QC settings agree. Not the floor prompt: it only found the arena, which the
+    scientist then confirmed, and the eval tries others when the first finds no floor."""
+    template = manifest.template.model_copy(update={"floor_prompt": ""})
+    return (template, manifest.video.fps, manifest.behaviours, manifest.models)
 
 
 def _protocol_output(study: _Study) -> Json:

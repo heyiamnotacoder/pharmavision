@@ -283,6 +283,20 @@ def test_a_study_whose_runs_were_filmed_differently_gets_no_report(
     assert not (study.path / "report.json").exists()
 
 
+def test_a_run_whose_floor_was_found_with_another_prompt_is_the_same_protocol(
+    tmp_path: Path, runs_dir: Path
+) -> None:
+    study = fixture_study(tmp_path, runs_dir)
+    other = RunFolder(runs_dir / "diazepam-2")
+    manifest = other.manifest()
+    template = manifest.template.model_copy(update={"floor_prompt": "white floor"})
+    other.write_manifest(manifest.model_copy(update={"template": template}))
+
+    report = study_report(study, runs_dir, ScriptedJudge(drafts=[HONEST]))
+
+    assert report.passed
+
+
 def test_a_commentary_message_beside_the_draft_is_not_part_of_the_report(
     tmp_path: Path, runs_dir: Path
 ) -> None:
