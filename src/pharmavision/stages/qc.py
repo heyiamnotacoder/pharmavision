@@ -21,7 +21,7 @@ from ..artifacts import (
     QcReviewSettings,
     RunFolder,
 )
-from ..judge import FlaggedWindow, HandSighting, Judge
+from ..judge import FlaggedWindow, HandSighting, Judge, TrialPhase
 from ..measure.qc import largest_area_cm2, trial_qc
 from ..segmenter import Segmenter
 from .clips import ClipView, cut_clips, read_frames, span_about
@@ -64,7 +64,13 @@ def _reviewed(
                 if (sighting := _hand(segmenter, stills[i], i, prompt, arena.px_per_cm))
             ]
             window = FlaggedWindow(
-                clip, flag.kind, flag.first_frame, flag.last_frame, flag.reason, tuple(hands)
+                clip,
+                flag.kind,
+                flag.first_frame,
+                flag.last_frame,
+                flag.reason,
+                _phase(flag, video, settings),
+                tuple(hands),
             )
             verdict = judge.review_window(window)
             reviews[k] = QcReview(
@@ -73,6 +79,17 @@ def _reviewed(
     ordered = [reviews[k] for k in range(len(warnings))]
     excluded = [_exclusion(r, video) for r in ordered if r.verdict != "keep"]
     return qc.model_copy(update={"exclusions": qc.exclusions + excluded, "reviews": ordered})
+
+
+def _phase(flag: QcFlag, video: NormalisedVideo, settings: QcReviewSettings) -> TrialPhase:
+    """Placement when the flag starts within `handling_s` of the first frame, removal when it
+    ends within it of the last, and the test otherwise."""
+    handling = settings.handling_s * video.fps
+    if flag.first_frame < handling:
+        return "placement"
+    if flag.last_frame > video.n_frames - 1 - handling:
+        return "removal"
+    return "test"
 
 
 def _sampled_frames(flag: QcFlag, n: int) -> list[int]:

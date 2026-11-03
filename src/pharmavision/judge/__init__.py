@@ -13,6 +13,10 @@ RearLabel = Literal["rearing", "none"]
 """Binary, as T2 decided: Muse Spark could not tell supported from unsupported rears (κ 0.24 on
 true rears, under the 0.4 bar; ARCHITECTURE open decision 3)."""
 
+TrialPhase = Literal["placement", "test", "removal"]
+"""When in the trial a QC flag lies: while the mouse is placed, during the test, or while it is
+lifted out. Measured from the flag's frames, so the model never has to guess it."""
+
 
 class ClipJudgement(BaseModel):
     """What the model said about one clip."""
@@ -70,6 +74,7 @@ class FlaggedWindow:
     last_frame: int
     reason: str
     """The rule's own reason, as the QC artifact records it."""
+    phase: TrialPhase
     hands: tuple[HandSighting, ...]
 
 

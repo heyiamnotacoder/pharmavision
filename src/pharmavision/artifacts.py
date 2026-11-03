@@ -171,6 +171,10 @@ class QcReviewSettings(Artifact):
     clip_max_side_px: int = Field(default=480, ge=16)
     """The whole frame, not a crop around the animal (a hand comes in from the edge), scaled to
     fit this many pixels on its longer side."""
+    handling_s: float = Field(default=10.0, ge=0)
+    """A flag starting this close to the first frame lies in the mouse's placement, and one
+    ending this close to the last in its removal: the model is told so, as a hand there is
+    expected in every trial."""
 
     @model_validator(mode="after")
     def _clip_lengths_are_ordered(self) -> "QcReviewSettings":

@@ -243,11 +243,13 @@ purity.
   - **Judges:** Muse Spark sees a clip of the **whole frame** (a hand comes in from the edge, so
     no crop around the animal), the flag padded by `clip_pad_s` (1 s), 2–6 s, scaled to fit
     `clip_max_side_px` (480), mask outlined in green, cut by the same `stages/clips.py` as the
-    behaviours clips. The prompt states the flag's kind, frames and reason and the hand
-    sightings, and asks for `{verdict: keep | exclude_window | exclude_trial, reason}`, cached
-    under `<model>/qc-v2/<hash>`. The prompt says every trial starts with a hand placing the
-    mouse and ends with one lifting it out, and that those are `exclude_window`: qc-v1 called
-    that handling `exclude_trial`, which excluded 7 of the 14 demo trials whole. It is told not to state numbers in its reason, but nothing
+    behaviours clips. The prompt states the flag's kind, frames, reason and **phase**, and the
+    hand sightings, and asks for `{verdict: keep | exclude_window | exclude_trial, reason}`,
+    cached under `<model>/qc-v2/<hash>`. The phase is measured, not judged: `placement` when
+    the flag starts within `handling_s` (10 s) of the first frame, `removal` when it ends
+    within it of the last, `test` otherwise. A hand placing or lifting out the mouse is
+    expected in every trial, so the prompt makes it `exclude_window`; handling during the test
+    stays `exclude_trial`. It is told not to state numbers in its reason, but nothing
     enforces that yet: the report stage must run the number audit over every model-written
     reason it shows, not only over the agent's prose (the audit never takes a number inside a
     string as known, T8a). A flag

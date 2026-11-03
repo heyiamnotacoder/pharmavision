@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 
-from pharmavision.artifacts import Exclusion, QcSettings
+from pharmavision.artifacts import Exclusion, QcReviewSettings, QcSettings
 from pharmavision.judge import Judge, WindowVerdict
 from pharmavision.judge.muse_spark import (
     JudgeResponseError,
@@ -95,7 +95,7 @@ def test_a_verdict_to_exclude_the_window_excludes_the_flagged_frames(
 def test_a_verdict_to_exclude_the_trial_excludes_it_with_the_models_reason(
     tmp_path: Path, runs_dir: Path
 ) -> None:
-    verdict = WindowVerdict(verdict="exclude_trial", reason="The mouse is lifted out.")
+    verdict = WindowVerdict(verdict="exclude_trial", reason="The mouse escapes the arena.")
 
     run = intruded_run(tmp_path, runs_dir, ScriptedJudge(verdict=verdict))
 
@@ -105,7 +105,7 @@ def test_a_verdict_to_exclude_the_trial_excludes_it_with_the_models_reason(
             scope="trial",
             first_frame=0,
             last_frame=N_FRAMES - 1,
-            reason="The mouse is lifted out.",
+            reason="The mouse escapes the arena.",
             source="model",
         )
     ]
@@ -201,6 +201,26 @@ def test_only_the_flagged_window_goes_to_the_models(tmp_path: Path, runs_dir: Pa
     assert 2 * 15 <= n_frames <= 6 * 15
 
 
+@pytest.mark.parametrize(
+    ("handling_s", "phase"),
+    [
+        (3.0, "placement"),  # the flag (frames 40-49) starts within 45 frames of the first
+        (1.0, "removal"),  # it ends within 15 frames of the last (59)
+        (0.5, "test"),
+    ],
+)
+def test_the_model_is_told_whether_a_flag_is_at_placement_removal_or_during_the_test(
+    tmp_path: Path, runs_dir: Path, handling_s: float, phase: str
+) -> None:
+    judge = ScriptedJudge()
+    settings = QcSettings(review=QcReviewSettings(handling_s=handling_s))
+
+    intruded_run(tmp_path, runs_dir, judge, qc_settings=settings)
+
+    [shown] = judge.windows
+    assert shown.window.phase == phase
+
+
 def test_recorded_muse_spark_verdicts_change_the_exclusions(tmp_path: Path, runs_dir: Path) -> None:
     # A first run records Muse Spark's verdict in the response cache, as the laptop would; the
     # recorded Judge then replays it by the same key, and never calls the API.
@@ -234,6 +254,7 @@ def test_recorded_muse_spark_verdicts_change_the_exclusions(tmp_path: Path, runs
     assert replay.qc().flags[0].reason in prompt
     assert "glove" in prompt
     assert "frame 40" in prompt
+    assert "when the mouse is placed" in prompt  # frames 40-49 of a 4 s scene: the start
     [seen, *_] = replay.qc().reviews[0].hands
     assert f"largest mask {seen.area_cm2:.0f} cm²" in prompt
     [part] = videos_sent(request)
