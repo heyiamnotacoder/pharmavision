@@ -15,7 +15,7 @@ Over 14 eval videos. The pipeline makes no rear count (ADR 0003): the eval count
 
 | Report | Pass rate | Bar | Met |
 |---|---|---|---|
-| Number-audit pass rate | 0 of 0 study reports (—) | 100% | — |
+| Number-audit pass rate | 1 of 1 study reports (100%) | 100% | yes |
 
 ## Rearing per video
 
@@ -54,7 +54,11 @@ Between two raters, the first rater's rears are the windows.
 
 ## Number audit
 
-No study report found: the pass rate abstains.
+| Study | Drafts | First draft passed | Passes now | Unmatched numbers |
+|---|---|---|---|---|
+| sturman-null-split | 1 | yes | yes |  |
+
+Each report's shipped draft is audited again against the tables its tools return now.
 
 ## Tracking against DeepLabCut
 
