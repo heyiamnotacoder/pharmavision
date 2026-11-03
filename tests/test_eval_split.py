@@ -35,7 +35,7 @@ def test_a_label_file_naming_other_videos_is_refused() -> None:
         check_split(load_split(), [*STURMAN_OFT_IDS[1:], "OFT_99"])
 
 
-def test_a_split_file_edited_by_hand_is_refused(tmp_path: Path) -> None:
+def test_a_split_file_edited_by_hand_is_refused() -> None:
     split = load_split()
     swapped = Split(
         seed=split.seed,

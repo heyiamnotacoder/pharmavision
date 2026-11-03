@@ -23,18 +23,23 @@ class DlcTrack:
     likelihood: NDArray[np.float64]
 
 
-def read_dlc(path: Path, bodypart: str = "bodycentre") -> DlcTrack:
+BODYPART = "bodycentre"
+"""The part compared with our mask centroid: the Sturman network's body centre."""
+
+
+def read_dlc(path: Path) -> DlcTrack:
+    """The body centre's path."""
     with path.open(newline="") as f:
         reader = csv.reader(f)
         _scorer, parts, coords = next(reader), next(reader), next(reader)
     columns = {
         coord: i
         for i, (part, coord) in enumerate(zip(parts, coords, strict=True))
-        if part == bodypart
+        if part == BODYPART
     }
     if set(columns) != {"x", "y", "likelihood"}:
         tracked = sorted(set(parts[1:]))
-        raise DlcFileError(f"{path.name} has no {bodypart!r} x/y/likelihood; it has {tracked}")
+        raise DlcFileError(f"{path.name} has no {BODYPART!r} x/y/likelihood; it has {tracked}")
     table = np.loadtxt(
         path,
         delimiter=",",

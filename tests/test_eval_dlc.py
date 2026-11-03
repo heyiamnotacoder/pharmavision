@@ -19,17 +19,12 @@ def test_reads_the_body_centre_per_frame(tmp_path: Path) -> None:
     assert dlc.likelihood.tolist() == [0.99, 0.2]
 
 
-def test_reads_another_body_part(tmp_path: Path) -> None:
+def test_a_file_without_a_body_centre_is_refused(tmp_path: Path) -> None:
     path = write_dlc(tmp_path / "dlc.csv", [(10.5, 20.0, 0.99)])
+    path.write_text(path.read_text().replace("bodycentre", "nose"))
 
-    assert read_dlc(path, "tailbase").x.tolist() == [7.0]
-
-
-def test_a_part_the_network_did_not_track_is_refused(tmp_path: Path) -> None:
-    path = write_dlc(tmp_path / "dlc.csv", [(10.5, 20.0, 0.99)])
-
-    with pytest.raises(DlcFileError, match="nose"):
-        read_dlc(path, "nose")
+    with pytest.raises(DlcFileError, match="bodycentre"):
+        read_dlc(path)
 
 
 def test_rows_out_of_frame_order_are_refused(tmp_path: Path) -> None:

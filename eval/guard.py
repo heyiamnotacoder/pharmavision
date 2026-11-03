@@ -6,16 +6,19 @@ import re
 import subprocess
 from pathlib import Path
 
-DATA_DIR = "eval/data"
-SAMPLE_PATHS = (
-    f"{DATA_DIR}/labels/AllLabDataOFT_final.csv",
-    f"{DATA_DIR}/dlc/3_01_A_190507121945DeepCut_resnet50_Blockcourse1May9shuffle1_1030000.csv",
-    f"{DATA_DIR}/videos/OFT_11.mp4",
-)
-"""Where the harness writes what it fetches; each must be ignored."""
+from .sturman import DATA, DLC_DIR, LABELS, video_path
 
-LABEL_LIKE = re.compile(r"AllLabData|DeepCut|(^|/)OFT_\d+_(Jin|FA|OS)\w*\.(csv|json)$")
-"""Names of the DLCAnalyzer files: the label table, DLC output, and the per-rater label files."""
+_REPO = Path(__file__).resolve().parents[1]
+DATA_DIR = DATA.resolve().relative_to(_REPO).as_posix()
+SAMPLE_PATHS = tuple(
+    p.resolve().relative_to(_REPO).as_posix()
+    for p in (LABELS, DLC_DIR / "3_01_A_190507121945DeepCut_resnet50.csv", video_path("OFT_11"))
+)
+"""Where the harness writes what it fetches, relative to the repo root; each must be ignored."""
+
+LABEL_LIKE = re.compile(r"AllLabData|DeepCut|(^|/)OFT_\d+_[A-Za-z]+\d*\.(csv|json)$")
+"""Names of the DLCAnalyzer files: the label table, DLC output, and the per-rater label files
+(`OFT_11_Jin.csv`, `OFT_11_Jin2.json`). The few-shot clips (`OFT_58_93.600.mp4`) don't match."""
 
 
 class LabelsNotIgnoredError(RuntimeError):

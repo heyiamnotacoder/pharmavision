@@ -53,3 +53,13 @@ def test_a_dlc_output_copied_elsewhere_is_refused(repo: Path) -> None:
 
     with pytest.raises(LabelsNotIgnoredError, match="DeepCut"):
         check_labels_untracked(repo)
+
+
+def test_a_rater_label_file_is_refused_whatever_the_initials(repo: Path) -> None:
+    copied = repo / "notes" / "OFT_23_KB2.json"
+    copied.parent.mkdir()
+    copied.write_text("{}\n")
+    git(repo, "add", str(copied))
+
+    with pytest.raises(LabelsNotIgnoredError, match="OFT_23_KB2"):
+        check_labels_untracked(repo)

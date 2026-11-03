@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from eval.split import train_eval_split
 from spike.rears import (
     Rear,
     RearKind,
@@ -11,7 +12,6 @@ from spike.rears import (
     load_rears,
     pick_clips,
     rear_recall,
-    train_eval_split,
 )
 
 HEADER = '"file";"Experimenter";"from";"to";"type";"ID";"DLCFile"\n'

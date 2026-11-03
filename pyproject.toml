@@ -71,6 +71,10 @@ strict = [
   "src/pharmavision/stats",
   "src/pharmavision/audit",
   "src/pharmavision/arrive.py",
+  # The eval's numbers (tracking against DLC, spend) feed eval/REPORT.md and the README.
+  "eval/dlc.py",
+  "eval/spend.py",
+  "eval/tracking.py",
 ]
 venvPath = "."
 venv = ".venv"

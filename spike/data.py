@@ -6,14 +6,12 @@ Videos: Sturman et al. 2020, Zenodo record 3608658, CC BY 4.0. Labels: DLCAnalyz
 read from the git-ignored eval/data/labels/; `python -m eval fetch` fetches them.
 """
 
-from pathlib import Path
-
 from eval.split import SPLIT_PATH as SPLIT
 from eval.split import check_split, load_split
 from eval.sturman import LABELS, VIDEOS, fetch_video
 from spike.rears import load_rears
 
-__all__ = ["LABELS", "SPLIT", "VIDEOS", "checked_train_ids", "download"]
+__all__ = ["LABELS", "SPLIT", "VIDEOS", "checked_train_ids"]  # the paths the spike scripts read
 
 
 def checked_train_ids() -> list[str]:
@@ -23,11 +21,7 @@ def checked_train_ids() -> list[str]:
     return list(split.train_ids)
 
 
-def download(video_id: str) -> Path:
-    return fetch_video(video_id)
-
-
 if __name__ == "__main__":
     for video_id in checked_train_ids():
-        path = download(video_id)
+        path = fetch_video(video_id)
         print(f"{path}  {path.stat().st_size / 1e6:.1f} MB")

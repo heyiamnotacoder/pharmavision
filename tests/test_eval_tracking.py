@@ -1,14 +1,24 @@
 """Our track against DeepLabCut's body centre: % of frames tracked and the centroid distance in
 cm. DLC is a reference, not ground truth, so the comparison reports, it does not grade."""
 
+import subprocess
 from collections.abc import Sequence
+from pathlib import Path
 
 import numpy as np
 import pytest
+from numpy.typing import NDArray
 
 from eval.dlc import DlcTrack
-from eval.tracking import TrackingSettings, compare_tracking
-from pharmavision.artifacts import Track, TrackFrame
+from eval.tracking import (
+    TrackingComparison,
+    TrackingSettings,
+    VideoMapping,
+    compare_tracking,
+    source_frame,
+)
+from pharmavision.artifacts import IngestSettings, Track, TrackFrame
+from pharmavision.stages.ingest import normalise
 
 PX_PER_CM = 1.5
 
@@ -43,10 +53,16 @@ def compare(
     dlc_fps: float = 15.0,
     scale: tuple[float, float] = (1.0, 1.0),
     settings: TrackingSettings | None = None,
-):
-    return compare_tracking(
-        "OFT_11", ours, reference, fps, dlc_fps, scale, PX_PER_CM, settings or TrackingSettings()
+) -> TrackingComparison:
+    mapping = VideoMapping(
+        fps=fps,
+        source_fps=dlc_fps,
+        source_frames=len(reference.x),
+        scale_x=scale[0],
+        scale_y=scale[1],
+        px_per_cm=PX_PER_CM,
     )
+    return compare_tracking("OFT_11", ours, reference, mapping, settings or TrackingSettings())
 
 
 def test_a_constant_offset_of_three_pixels_is_two_cm_on_every_frame() -> None:
@@ -62,18 +78,36 @@ def test_a_constant_offset_of_three_pixels_is_two_cm_on_every_frame() -> None:
     assert result.distance_cm.p95 == pytest.approx(2.0)
     assert result.distance_cm.max == pytest.approx(2.0)
     assert result.over_disagreement_pct == 0.0
+    assert result.best_lag is not None
+    assert result.best_lag.lag_frames == 0
 
 
 def test_frames_are_matched_by_time_when_dlc_ran_at_the_source_rate() -> None:
-    # 25 fps DLC against our 15 fps: our frame i is at i/15 s, DLC frame round(i * 25 / 15).
-    # The DLC body centre's x is its own frame number, so only the right match gives 0 cm.
+    # 25 fps DLC against our 15 fps: frames 0-3 kept source frames 0, 2, 4 and 5 (see the
+    # ffmpeg test below). DLC's x is its own frame number, so only the right match gives 0 cm.
     reference = dlc([(float(k), 0.0) for k in range(8)])
-    ours = track([(0.0, 0.0), (2.0, 0.0), (3.0, 0.0), (5.0, 0.0)])
+    ours = track([(0.0, 0.0), (2.0, 0.0), (4.0, 0.0), (5.0, 0.0)])
 
     result = compare(ours, reference, fps=15.0, dlc_fps=25.0)
 
     assert result.distance_cm is not None
     assert result.distance_cm.max == 0.0
+
+
+def test_a_dlc_track_starting_late_is_found_by_the_alignment_check() -> None:
+    # DLC's rows start 3 source frames late: its frame k shows what the source had at k - 3.
+    kept = source_frame(np.arange(30), 15.0, 25.0)
+    ours = track([(float(k), 0.0) for k in kept])
+    reference = dlc([(float(k - 3), 0.0) for k in range(60)])
+
+    result = compare(ours, reference, fps=15.0, dlc_fps=25.0)
+
+    assert result.distance_cm is not None
+    assert result.distance_cm.median == pytest.approx(3 / PX_PER_CM)
+    assert result.best_lag is not None
+    assert result.best_lag.lag_frames == 3
+    assert result.best_lag.median_cm == 0.0
+    assert (result.dlc_frames, result.source_frames) == (60, 60)
 
 
 def test_dlc_pixels_are_scaled_to_the_normalised_video() -> None:
@@ -119,6 +153,7 @@ def test_with_no_frame_to_compare_the_distance_abstains() -> None:
     assert result.distance_cm is None
     assert result.over_disagreement_pct is None
     assert result.largest == []
+    assert result.best_lag is None
 
 
 def test_the_largest_disagreements_are_listed_for_checking_by_eye() -> None:
@@ -135,3 +170,31 @@ def test_the_largest_disagreements_are_listed_for_checking_by_eye() -> None:
     ]
     assert result.largest[0].time_s == pytest.approx(1 / 15)
     assert result.over_disagreement_pct == 50.0
+
+
+def frame_numbers(video: Path) -> NDArray[np.int64]:
+    """Each frame's number, read back from the luma that `numbered_video` gave it."""
+    raw = subprocess.run(
+        ["ffmpeg", "-v", "error", "-i", str(video), "-vf", "extractplanes=y",
+         "-f", "rawvideo", "-pix_fmt", "gray", "-"],
+        check=True, capture_output=True,
+    ).stdout  # fmt: skip
+    luma = np.frombuffer(raw, dtype=np.uint8).reshape(-1, 64 * 64)
+    return np.rint((np.median(luma, axis=1) - 16) / 1.5).astype(np.int64)
+
+
+def test_each_frame_meets_the_source_frame_ingest_kept_for_it(tmp_path: Path) -> None:
+    # A 25 fps source whose frame k is a flat grey of luma 16 + 1.5 k, through the real ingest.
+    source = tmp_path / "numbered.mp4"
+    subprocess.run(
+        ["ffmpeg", "-v", "error", "-y", "-f", "lavfi",
+         "-i", "nullsrc=s=64x64:r=25:d=4.8,geq=lum='16+1.5*N':cb=128:cr=128",
+         "-c:v", "libx264", "-qp", "0", "-pix_fmt", "yuv420p", str(source)],
+        check=True,
+    )  # fmt: skip
+    normalised = normalise(source, tmp_path / "video.mp4", IngestSettings())
+    kept = frame_numbers(tmp_path / "video.mp4")
+
+    assert frame_numbers(source).tolist() == list(range(120))
+    assert len(kept) == normalised.n_frames == 72
+    assert source_frame(np.arange(72), normalised.fps, 25.0).tolist() == kept.tolist()

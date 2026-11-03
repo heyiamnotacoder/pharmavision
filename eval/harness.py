@@ -19,9 +19,9 @@ from pharmavision.segmenter import Segmenter
 from pharmavision.templates import OPEN_FIELD, TestTemplate
 
 from .dlc import read_dlc
-from .spend import Call, ModelSpend, by_model
+from .spend import Call, ModelSpend, by_model, total_usd
 from .sturman import DATA
-from .tracking import TrackingComparison, TrackingSettings, compare_tracking
+from .tracking import TrackingComparison, TrackingSettings, VideoMapping, compare_tracking
 
 FLOOR_PROMPTS = ("square floor", "white floor", "open field arena", "floor", "box")
 """Tried in order until SAM 3.1 finds a floor: on the Sturman videos OFT_12 and OFT_52 took
@@ -41,6 +41,9 @@ class Paths:
     @property
     def results(self) -> Path:
         return self.root / "tracking"
+
+    def result(self, video_id: str) -> Path:
+        return self.results / f"{video_id}.json"
 
     @property
     def spend_log(self) -> Path:
@@ -94,7 +97,6 @@ def evaluate_video(
     meter: Meter,
     paths: Paths,
     template: TestTemplate = OPEN_FIELD,
-    settings: TrackingSettings | None = None,
 ) -> VideoResult:
     """Track the video (or reuse its tracked run), compare it with its DLC output, and write
     the result to `paths.results`. The spend of every attempt goes to `paths.spend_log`, also
@@ -104,16 +106,9 @@ def evaluate_video(
     try:
         run = _tracked_run(video_id, video, segmenter, paths.runs, template)
         manifest = run.manifest()
-        source, normalised = manifest.source, manifest.video
+        mapping = VideoMapping.of(manifest, run.confirmed_arena())
         tracking = compare_tracking(
-            video_id,
-            run.track(),
-            read_dlc(dlc_csv),
-            fps=normalised.fps,
-            dlc_fps=source.fps,
-            scale=(normalised.width / source.width, normalised.height / source.height),
-            px_per_cm=run.confirmed_arena().px_per_cm,
-            settings=settings or TrackingSettings(),
+            video_id, run.track(), read_dlc(dlc_csv), mapping, TrackingSettings()
         )
         finished = True
     finally:
@@ -125,10 +120,10 @@ def evaluate_video(
         floor_prompt=manifest.template.floor_prompt,
         tracking=tracking,
         spend=spend,
-        spent_usd=sum(s.usd for s in spend.values()),
+        spent_usd=total_usd(spend),
     )
     paths.results.mkdir(parents=True, exist_ok=True)
-    (paths.results / f"{video_id}.json").write_text(result.model_dump_json(indent=2) + "\n")
+    paths.result(video_id).write_text(result.model_dump_json(indent=2) + "\n")
     return result
 
 
@@ -137,7 +132,7 @@ def summarise(video_ids: Sequence[str], paths: Paths) -> TrackingSummary:
     videos: list[VideoResult] = []
     missing: list[str] = []
     for video_id in video_ids:
-        path = paths.results / f"{video_id}.json"
+        path = paths.result(video_id)
         if path.exists():
             videos.append(VideoResult.model_validate_json(path.read_text()))
         else:
@@ -182,7 +177,7 @@ def _tracked_run(
     else:
         raise ArenaNotFoundError(f"{video_id}: no floor found with any of {list(prompts)}")
     confirm_arena(run)
-    run_stage(run, Stage.TRACK, segmenter, _TrackOnly())
+    run_stage(run, Stage.TRACK, segmenter, _NoJudge())
     return run
 
 
@@ -192,14 +187,14 @@ def _log_spend(log: Path, video_id: str, finished: bool, spend: dict[str, ModelS
         at=datetime.now(UTC),
         finished=finished,
         by_model=spend,
-        usd=sum(s.usd for s in spend.values()),
+        usd=total_usd(spend),
     )
     log.parent.mkdir(parents=True, exist_ok=True)
     with log.open("a") as f:
         f.write(json.dumps(entry.model_dump(mode="json")) + "\n")
 
 
-class _TrackOnly:
+class _NoJudge:
     """The judge the track stage is handed and never asks: the tracking eval calls no Muse
     Spark, so any call here is a bug."""
 

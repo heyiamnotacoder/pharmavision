@@ -28,7 +28,7 @@ from .guard import check_labels_untracked
 from .harness import Paths, TrackingSummary, evaluate_video, spent_by_video, summarise
 from .spend import MeteredTransport, VideoPlan, format_projection, project
 from .split import Split, check_split, load_split
-from .sturman import LABELS, VIDEOS, dlc_files, fetch_dlc, fetch_labels, fetch_video
+from .sturman import LABELS, dlc_files, fetch_dlc, fetch_labels, fetch_video, video_path
 
 REPO = Path(__file__).resolve().parents[1]
 NOMINAL_DURATION_S = 609.5
@@ -61,10 +61,8 @@ def plan(split: Split, paths: Paths) -> str:
     plans = [
         VideoPlan(
             video_id=video_id,
-            duration_s=duration_s(VIDEOS / f"{video_id}.mp4"),
-            spent_usd=spent.get(video_id, 0.0)
-            if (paths.results / f"{video_id}.json").exists()
-            else None,
+            duration_s=duration_s(video_path(video_id)),
+            spent_usd=spent.get(video_id, 0.0) if paths.result(video_id).exists() else None,
         )
         for video_id in split.eval_ids
     ]
@@ -94,13 +92,16 @@ def track(yes: bool, paths: Paths) -> TrackingSummary:
         except ArenaNotFoundError as error:
             print(f"{video_id}: skipped, {error}", flush=True)
             continue
-        t = result.tracking
-        median = "-" if t.distance_cm is None else f"{t.distance_cm.median:.2f} cm"
+        tracking = result.tracking
+        median = "-" if tracking.distance_cm is None else f"{tracking.distance_cm.median:.2f} cm"
         print(
-            f"{video_id}: {t.tracked_pct:.1f}% tracked, median {median} from DLC, "
+            f"{video_id}: {tracking.tracked_pct:.1f}% tracked, median {median} from DLC, "
             f"${result.spent_usd:.4f} ({result.floor_prompt!r})",
             flush=True,
         )
+        unreported = sum(s.unreported_calls for s in result.spend.values())
+        if unreported:
+            print(f"{video_id}: {unreported} calls reported no usage; check the Meta console")
     summary = summarise(split.eval_ids, paths)
     (paths.results / "summary.json").write_text(summary.model_dump_json(indent=2) + "\n")
     return summary

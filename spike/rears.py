@@ -11,9 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-# Re-exported: the split lives with the eval harness, which owns split.json.
-from eval.split import SPLIT_SEED as SPLIT_SEED
-from eval.split import train_eval_split as train_eval_split
+from eval.split import SPLIT_SEED
 
 RearKind = Literal["supported", "unsupported"]
 Truth = Literal["supported", "unsupported", "none"]

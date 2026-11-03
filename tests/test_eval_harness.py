@@ -25,9 +25,6 @@ def walk(frame: float) -> tuple[float, float]:
     return (180 + 60 * math.cos(angle), 180 + 60 * math.sin(angle))
 
 
-WALK = walk
-
-
 class FakeMeter:
     """What the API billed: nothing before the video, then one SAM 3.1 track."""
 
@@ -51,14 +48,14 @@ def video(tmp_path: Path) -> Path:
 @pytest.fixture
 def dlc_csv(tmp_path: Path) -> Path:
     # DLC ran at the source's 25 fps, on the same walk: frame k is at our frame k * 15 / 25.
-    points = [(*WALK(k * 15 / SOURCE_FPS), 0.99) for k in range(4 * SOURCE_FPS)]
+    points = [(*walk(k * 15 / SOURCE_FPS), 0.99) for k in range(4 * SOURCE_FPS)]
     return write_dlc(tmp_path / "3_01_A_1DeepCut.csv", points)
 
 
 def test_a_video_is_tracked_compared_with_dlc_and_its_spend_logged(
     paths: Paths, video: Path, dlc_csv: Path
 ) -> None:
-    segmenter = SyntheticSegmenter(floor=FLOOR, trajectory=WALK)
+    segmenter = SyntheticSegmenter(floor=FLOOR, trajectory=walk)
 
     result = evaluate_video("OFT_11", video, dlc_csv, segmenter, FakeMeter(), paths, TEMPLATE)
 
@@ -72,7 +69,7 @@ def test_a_video_is_tracked_compared_with_dlc_and_its_spend_logged(
     assert result.floor_prompt == TEMPLATE.floor_prompt
     assert result.spend["sam-3.1"].usage.video_frames == 60
     assert result.spent_usd == pytest.approx(0.012)
-    assert json.loads((paths.results / "OFT_11.json").read_text())["video_id"] == "OFT_11"
+    assert json.loads(paths.result("OFT_11").read_text())["video_id"] == "OFT_11"
     (logged,) = [json.loads(line) for line in paths.spend_log.read_text().splitlines()]
     assert logged["video_id"] == "OFT_11"
     assert logged["usd"] == pytest.approx(0.012)
@@ -82,14 +79,14 @@ def test_a_video_is_tracked_compared_with_dlc_and_its_spend_logged(
 def test_the_next_floor_prompt_is_tried_when_sam_finds_no_square_floor(
     paths: Paths, video: Path, dlc_csv: Path
 ) -> None:
-    segmenter = SyntheticSegmenter(floor=FLOOR, trajectory=WALK, floor_prompt="white floor")
+    segmenter = SyntheticSegmenter(floor=FLOOR, trajectory=walk, floor_prompt="white floor")
 
     result = evaluate_video("OFT_11", video, dlc_csv, segmenter, FakeMeter(), paths, TEMPLATE)
 
     assert result.floor_prompt == "white floor"
 
 
-def test_a_video_with_no_floor_found_logs_its_spend_and_is_summarised_as_missing(
+def test_a_video_with_no_floor_found_still_logs_its_spend(
     paths: Paths, video: Path, dlc_csv: Path
 ) -> None:
     with pytest.raises(ArenaNotFoundError):
@@ -97,12 +94,18 @@ def test_a_video_with_no_floor_found_logs_its_spend_and_is_summarised_as_missing
 
     (logged,) = [json.loads(line) for line in paths.spend_log.read_text().splitlines()]
     assert logged["video_id"] == "OFT_12"
-    assert not (paths.results / "OFT_12.json").exists()
+    assert logged["finished"] is False
+    assert not paths.result("OFT_12").exists()
 
-    evaluate_video(
-        "OFT_11", video, dlc_csv, SyntheticSegmenter(floor=FLOOR, trajectory=WALK), FakeMeter(),
-        paths, TEMPLATE,
-    )  # fmt: skip
+
+def test_the_summary_lists_eval_videos_with_no_result_and_sums_every_attempt(
+    paths: Paths, video: Path, dlc_csv: Path
+) -> None:
+    with pytest.raises(ArenaNotFoundError):
+        evaluate_video("OFT_12", video, dlc_csv, SyntheticSegmenter(), FakeMeter(), paths, TEMPLATE)
+    segmenter = SyntheticSegmenter(floor=FLOOR, trajectory=walk)
+    evaluate_video("OFT_11", video, dlc_csv, segmenter, FakeMeter(), paths, TEMPLATE)
+
     summary = summarise(["OFT_11", "OFT_12"], paths)
 
     assert [r.video_id for r in summary.videos] == ["OFT_11"]
@@ -111,7 +114,7 @@ def test_a_video_with_no_floor_found_logs_its_spend_and_is_summarised_as_missing
 
 
 def test_a_finished_video_is_not_run_again(paths: Paths, video: Path, dlc_csv: Path) -> None:
-    segmenter = SyntheticSegmenter(floor=FLOOR, trajectory=WALK)
+    segmenter = SyntheticSegmenter(floor=FLOOR, trajectory=walk)
     first = evaluate_video("OFT_11", video, dlc_csv, segmenter, FakeMeter(), paths, TEMPLATE)
 
     again = evaluate_video(

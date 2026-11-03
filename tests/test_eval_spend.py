@@ -8,6 +8,7 @@ from eval.spend import (
     UnknownPriceError,
     Usage,
     VideoPlan,
+    by_model,
     cost_usd,
     format_projection,
     project,
@@ -27,7 +28,41 @@ def test_a_recorded_sam_track_is_billed_per_video_frame() -> None:
     assert call.model == "sam-3.1"
     assert call.usage.video_frames == 9142
     assert call.usd == pytest.approx(1.8284)
+    assert call.usage_reported
     assert metered.take() == []
+
+
+def test_a_model_with_no_known_price_is_refused_before_it_is_called() -> None:
+    inner = ReplayTransport([read_fixture("OFT_16_track")])
+    metered = MeteredTransport(inner)
+
+    with pytest.raises(UnknownPriceError):
+        list(metered.stream({"model": "muse-wonder-1.0", "input": []}))
+
+    assert inner.requests == []
+
+
+def test_a_response_without_usage_is_logged_as_unreported_not_as_free() -> None:
+    events = read_fixture("OFT_16_track")
+    events[-1]["response"]["usage"] = None
+    metered = MeteredTransport(ReplayTransport([events]))
+
+    list(metered.stream({"model": "sam-3.1", "input": []}))
+
+    (call,) = metered.take()
+    assert not call.usage_reported
+    assert by_model([call])["sam-3.1"].unreported_calls == 1
+
+
+def test_a_stream_that_breaks_before_completing_is_logged_as_unreported() -> None:
+    cut = read_fixture("OFT_16_track")[:5]
+    metered = MeteredTransport(ReplayTransport([cut]))
+
+    list(metered.stream({"model": "sam-3.1", "input": []}))
+
+    (call,) = metered.take()
+    assert not call.usage_reported
+    assert call.usd == 0.0
 
 
 def test_a_short_video_request_is_billed_the_fifty_frame_minimum() -> None:
@@ -101,6 +136,6 @@ def test_the_projection_is_printed_per_video_with_its_total_before_a_run() -> No
         "video     status   projected $   spent $",
         "OFT_11    to run        1.8295         -",
         "OFT_12    done          0.0000    1.8300",
-        "1 of 2 videos to run: projected $1.83 at most (cached responses cost nothing); "
-        "$1.83 spent so far",
+        "1 of 2 videos to run: projected $1.83 (cached responses cost nothing; each extra "
+        "floor prompt tried adds $0.0025); $1.83 spent so far",
     ]

@@ -43,6 +43,30 @@ PRICES: dict[str, Price] = {
 }
 
 
+class _TokenDetails(BaseModel):
+    cached_tokens: int | None = None
+
+
+class _ReportedUsage(BaseModel):
+    """A Responses `usage` block as it comes: any field may be null or missing."""
+
+    input_tokens: int | None = None
+    input_tokens_details: _TokenDetails | None = None
+    output_tokens: int | None = None
+    video_frames_processed: int | None = None
+    images_processed: int | None = None
+
+
+class _Response(BaseModel):
+    usage: _ReportedUsage | None = None
+
+
+class _Completed(BaseModel):
+    """The `response.completed` event, the one that carries the usage."""
+
+    response: _Response
+
+
 class Usage(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -57,13 +81,17 @@ class Usage(BaseModel):
     def from_response(cls, usage: Mapping[str, Any]) -> "Usage":
         """From a Responses `usage` block; Meta adds `video_frames_processed` and
         `images_processed` for SAM 3.1."""
-        details = usage.get("input_tokens_details") or {}
+        return cls.reported(_ReportedUsage.model_validate(usage))
+
+    @classmethod
+    def reported(cls, reported: "_ReportedUsage") -> "Usage":
+        details = reported.input_tokens_details or _TokenDetails()
         return cls(
-            input_tokens=usage.get("input_tokens") or 0,
-            cached_tokens=details.get("cached_tokens") or 0,
-            output_tokens=usage.get("output_tokens") or 0,
-            video_frames=usage.get("video_frames_processed") or 0,
-            images=usage.get("images_processed") or 0,
+            input_tokens=reported.input_tokens or 0,
+            cached_tokens=details.cached_tokens or 0,
+            output_tokens=reported.output_tokens or 0,
+            video_frames=reported.video_frames_processed or 0,
+            images=reported.images_processed or 0,
         )
 
     def __add__(self, other: "Usage") -> "Usage":
@@ -88,13 +116,16 @@ def cost_usd(model: str, usage: Usage) -> float:
 
 
 class Call(BaseModel):
-    """One live, billed response."""
+    """One live request: billed by the usage its response reported."""
 
     model_config = ConfigDict(frozen=True)
 
     model: str
     usage: Usage
     usd: float
+    usage_reported: bool = True
+    """False when no usage came back (no usage block, or the stream broke before it completed):
+    Meta may still have billed it, so its $0 is unknown, not free."""
 
 
 class MeteredTransport:
@@ -108,14 +139,20 @@ class MeteredTransport:
         return self.inner.upload(video)
 
     def stream(self, request: Request) -> Iterator[Event]:
-        for event in self.inner.stream(request):
-            if event.get("type") == "response.completed":
-                response = event.get("response")
-                block = response.get("usage") if isinstance(response, Mapping) else None
-                usage = Usage.from_response(block if isinstance(block, Mapping) else {})
-                model = str(request["model"])
-                self._calls.append(Call(model=model, usage=usage, usd=cost_usd(model, usage)))
-            yield event
+        """Refuses a model with no known price before anything is sent."""
+        model = str(request["model"])
+        cost_usd(model, Usage())
+        call = Call(model=model, usage=Usage(), usd=0.0, usage_reported=False)
+        try:
+            for event in self.inner.stream(request):
+                if event.get("type") == "response.completed":
+                    reported = _Completed.model_validate(event).response.usage
+                    if reported is not None:
+                        usage = Usage.reported(reported)
+                        call = Call(model=model, usage=usage, usd=cost_usd(model, usage))
+                yield event
+        finally:
+            self._calls.append(call)
 
     def take(self) -> list[Call]:
         """The calls metered since the last `take`."""
@@ -129,6 +166,8 @@ class ModelSpend(BaseModel):
     calls: int
     usage: Usage
     usd: float
+    unreported_calls: int = 0
+    """Calls with no usage reported, so not in `usd`: the log says so instead of hiding them."""
 
 
 def by_model(calls: Sequence[Call]) -> dict[str, ModelSpend]:
@@ -137,9 +176,16 @@ def by_model(calls: Sequence[Call]) -> dict[str, ModelSpend]:
     for call in calls:
         seen = out.get(call.model, ModelSpend(calls=0, usage=Usage(), usd=0.0))
         out[call.model] = ModelSpend(
-            calls=seen.calls + 1, usage=seen.usage + call.usage, usd=seen.usd + call.usd
+            calls=seen.calls + 1,
+            usage=seen.usage + call.usage,
+            usd=seen.usd + call.usd,
+            unreported_calls=seen.unreported_calls + (not call.usage_reported),
         )
     return out
+
+
+def total_usd(spend: Mapping[str, ModelSpend]) -> float:
+    return sum(s.usd for s in spend.values())
 
 
 class VideoPlan(BaseModel):
@@ -180,9 +226,9 @@ class Projection(BaseModel):
 
 def project(plans: Sequence[VideoPlan], fps: int, sam: MetaApiSettings | None = None) -> Projection:
     """SAM 3.1's price for the arena (one floor image) and the track (every frame at `fps`, in
-    the chunks the segmenter would send) of each video still to run. An upper bound: responses
-    already in the model cache cost nothing, and a floor found only on a later prompt costs one
-    image more per prompt tried."""
+    the chunks the segmenter would send) of each video still to run. Responses already in the
+    model cache cost nothing; a floor found only on a later prompt costs one image more per
+    prompt tried, and a response that broke off is paid again on the retry."""
     sam = sam or MetaApiSettings()
     rows: list[ProjectedVideo] = []
     for plan in plans:
@@ -213,7 +259,8 @@ def format_projection(projection: Projection) -> str:
         lines.append(f"{row.video_id:<9} {status:<8} {row.projected_usd:>11.4f} {spent:>9}")
     lines.append(
         f"{len(projection.to_run)} of {len(projection.rows)} videos to run: "
-        f"projected ${projection.total_usd:.2f} at most (cached responses cost nothing); "
+        f"projected ${projection.total_usd:.2f} (cached responses cost nothing; each extra "
+        f"floor prompt tried adds $0.0025); "
         f"${projection.spent_usd:.2f} spent so far"
     )
     return "\n".join(lines)

@@ -10,7 +10,6 @@ Videos are keyed by their label-file `ID` throughout. The DLC output is named by
 never by the number in either name."""
 
 import csv
-from collections.abc import Callable
 from pathlib import Path
 
 import httpx
@@ -57,11 +56,15 @@ def fetch_dlc(name: str) -> Path:
     return _fetch(DLC_URL.format(name=name), DLC_DIR / name)
 
 
+def video_path(video_id: str) -> Path:
+    return VIDEOS / f"{video_id}.mp4"
+
+
 def fetch_video(video_id: str) -> Path:
-    return _fetch(VIDEO_URL.format(video_id=video_id), VIDEOS / f"{video_id}.mp4")
+    return _fetch(VIDEO_URL.format(video_id=video_id), video_path(video_id))
 
 
-def _fetch(url: str, dest: Path, log: Callable[[str], None] = print) -> Path:
+def _fetch(url: str, dest: Path) -> Path:
     """Download once: a file already there is reused, and a partial download never is."""
     if dest.exists():
         return dest
@@ -73,5 +76,5 @@ def _fetch(url: str, dest: Path, log: Callable[[str], None] = print) -> Path:
             for chunk in response.iter_bytes():
                 f.write(chunk)
     part.rename(dest)
-    log(f"fetched {dest} ({dest.stat().st_size / 1e6:.1f} MB)")
+    print(f"fetched {dest} ({dest.stat().st_size / 1e6:.1f} MB)")
     return dest
