@@ -23,7 +23,8 @@ Run folder layout, one per video:
 runs/<run_id>/
   manifest.json      # input hash, fps, frame size, test type, arena dims, code + model versions, measure settings
   video.mp4          # normalised video
-  arena.json         # zone polygons (px) + px_per_cm, confirmed flag
+  arena.json         # zone polygons (px) + px_per_cm, confirmed flag; empty if no floor was found
+  background.png     # the background frame the floor was looked for on; the zone editor draws on it
   track.parquet      # one row per frame: centroid, area, bbox, axes, orientation, mask RLE, gap flag, second-mask area
   metrics.json       # per-animal metric table (measures)
   events.parquet     # behaviour events: first/last frame, label, confidence, low_confidence, rationale, source (rule | model)
@@ -73,7 +74,10 @@ video format both SAM 3.1 and Muse Spark accept.
   OFT_44 (CAM01) and OFT_54 (CAM03), "square floor" found nothing; equalised, it scored 0.62 and
   0.53, the same floor (21.7% of the frame) as on the CAM04 videos, which also scored a little
   higher (0.66 → 0.69 on OFT_50). Found by the rear-recall run, Oct 30. OFT_54 still sits near the
-  cutoff, so a floor that is never found has to fall back to the user drawing it (T10).
+  cutoff, so a floor that is never found falls back to the user drawing it (T10): the run waits
+  at the gate with an **empty arena** (no floor, no centre, `px_per_cm` 0), and only a floor can
+  be confirmed. A floor is usable with at least 3 corners, all on the frame, edges that don't
+  cross, and some area; a detected outline that isn't is treated as no floor.
 - **Derived zones are geometry, not prompts.** The open-field centre zone is the inner X% of the
   floor polygon **by area** (the floor shrunk about its centroid), computed in Python. The open
   field template uses 50%, as Sturman et al. 2020 did (45 × 45 cm arena, 10 min).
@@ -83,7 +87,9 @@ video format both SAM 3.1 and Muse Spark accept.
   (found in the spike, Oct 30).
 - **The UI shows the zones and the user confirms or drags vertices.** Nothing downstream runs until
   `arena.json.confirmed == true`. This is the one human-in-the-loop gate. It is cheap and removes
-  the largest source of systematic error.
+  the largest source of systematic error. The editor sends only the floor
+  (`confirm_arena(run, floor_px)`): the centre zone and `px_per_cm` are derived from it again,
+  exactly as from a detected floor, so the centre zone is never drawn by hand (T10).
 
 ### 3. Track (sees)
 - SAM 3.1 video tracking with a species prompt ("mouse" or "rat"). It expects N animals from the
@@ -420,14 +426,15 @@ the demo and write-up, the same way PaedScale published its validation table.
   | `POST /runs` | upload a video (multipart `video`) and a `template` name; 202, then ingest + arena run in the background |
   | `GET /runs`, `GET /runs/{id}` | status, the stage running (or the one that failed), the error, `stages_done`, and a URL per artifact present |
   | `GET /runs/{id}/artifacts/{name}` | `manifest`, `arena`, `track`, `metrics`, `events` or `qc` as JSON, validated on read; `GET /runs/{id}/video` the normalised MP4 |
-  | `POST /runs/{id}/arena/confirm` | the gate: 202, then track → QC in the background; 409 unless the run is `awaiting zone confirmation` (T10 adds edited zones) |
+  | `POST /runs/{id}/arena/confirm` | the gate, with an optional JSON body `{"floor_px": [[x, y], …]}`, the floor as edited or drawn: 202, then track → QC in the background; 409 unless the run is `awaiting zone confirmation`; 422, leaving it there, for a floor the zones can't come from, or none on an empty arena. The floor is checked before the gate is claimed |
+  | `GET /runs/{id}/background` | the background frame (PNG) the zone editor draws on |
   | `GET /runs/{id}/stream` | SSE: one `stage` event per finished stage (its `id` is the resume point for `Last-Event-ID`), then one `status` event once the run rests, and the stream ends |
   | `GET /studies` | every study folder with a `study.yaml`, as `GET /studies/{id}` shows it |
   | `POST /studies/{id}/report`, `GET /studies/{id}`, `GET /studies/{id}/artifacts/{name}` | the study's report job over `studies/<id>/study.yaml`: stage 7 (stats), then stage 8 (the report agent), `report` served as an artifact |
 
   - **Jobs:** FastAPI background tasks in the API's process, status in SQLite
     (`runs/jobs.sqlite3`): `queued`, `running`, `awaiting zone confirmation`, `done` or
-    `failed` with the error message (a too-short video, a floor never found). One process
+    `failed` with the error message (a too-short video). One process
     only: on start-up, jobs a previous process left queued or running are marked failed. A
     failed run is not retried; processing the video again is a new run.
   - **Uploads** wait in `runs/.uploads/<run_id>/` until ingest has read them, then are
@@ -446,6 +453,12 @@ the demo and write-up, the same way PaedScale published its validation table.
     (typecheck, ESLint, Vitest, build). It reads the API at `VITE_API_BASE` (default `/api`,
     which the dev server proxies to `:8000`). Three screens, by URL hash: the study and run
     lists, `#/runs/<id>`, the run viewer (T9b, T11), and `#/studies/<id>`, the report (T11).
+  - **Zone editor (T10):** on a live run at the gate, the background frame with the floor as an
+    SVG polygon over it. Its corners drag (or move with the arrow keys, Shift for 10 px); where
+    no floor was found, four clicks draw it. The centre zone is a dashed preview that follows
+    the floor (`zones.ts` mirrors `shrink_to_area_fraction`) and has no corners of its own.
+    Confirm sends the floor; the backend's refusal reason is shown and the editor stays open.
+    Once confirmed, the viewer follows the run's progress stream and reloads as stages finish.
   - **Frames are shown by index**, as the artifacts and the report write them (frame 0 is the
     first), with the time they start at. Seeking to frame i sets the video to the middle of
     its interval, `(i + 0.5) / fps`, so the player shows frame i and not the one before.

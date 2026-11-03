@@ -1,33 +1,68 @@
-"""Arena (sees): find the floor on a background frame, then derive the zones and scale in code."""
+"""Arena (sees): find the floor on a background frame, then derive the zones and scale in code.
+The floor is SAM 3.1's or, where it found none or the scientist moved its corners, the one
+drawn in the zone editor; the centre zone and the scale always follow from it."""
+
+from collections.abc import Sequence
 
 import cv2
 import numpy as np
 from numpy.typing import NDArray
+from shapely.geometry import Polygon
 
 from ..artifacts import Arena, RunFolder
-from ..measure.geometry import Point, polygon_area, px_per_cm, shrink_to_area_fraction
+from ..measure.geometry import Point, px_per_cm, shrink_to_area_fraction
 from ..segmenter import Segmenter, best_mask
+from ..templates import TestTemplate
+
+EMPTY = Arena(floor_px=[], centre_px=[], px_per_cm=0.0, confirmed=False)
+"""What the stage leaves when no floor was found: the scientist draws one at the gate."""
 
 
-class ArenaNotFoundError(RuntimeError):
+class InvalidFloorError(ValueError):
     pass
 
 
-def detect(run: RunFolder, segmenter: Segmenter) -> Arena:
+def run(run: RunFolder, segmenter: Segmenter) -> Arena:
+    """Write the background frame, and the arena found on it (EMPTY if no usable floor was)."""
     manifest = run.manifest()
-    template, settings = manifest.template, manifest.arena
+    template, settings, video = manifest.template, manifest.arena, manifest.video
     background = background_frame(run, settings.background_samples)
+    if not cv2.imwrite(str(run.background_path), background):
+        raise OSError(f"could not write {run.background_path}")
     image = equalise(background, settings.contrast_clip_limit, settings.contrast_tiles)
     mask = best_mask(segmenter.segment_image(image, template.floor_prompt))
     floor = mask_to_polygon(mask.pixels, settings.outline_tolerance) if mask else []
-    if len(floor) < 3 or polygon_area(floor) == 0:
-        raise ArenaNotFoundError(f"no {template.floor_prompt!r} found in run {run.run_id}")
+    try:
+        check_floor(floor, video.width, video.height)
+    except InvalidFloorError:
+        return EMPTY
+    return zones(floor, template)
+
+
+def zones(floor: Sequence[Point], template: TestTemplate) -> Arena:
+    """The unconfirmed arena on `floor`: the centre zone and the scale come from it, so an
+    edited floor moves both."""
     return Arena(
-        floor_px=floor,
+        floor_px=list(floor),
         centre_px=shrink_to_area_fraction(floor, template.centre_area_fraction),
         px_per_cm=px_per_cm(floor, template.arena_width_cm, template.arena_height_cm),
         confirmed=False,
     )
+
+
+def check_floor(floor: Sequence[Point], width: int, height: int) -> None:
+    """Refuse a floor the zones can't be derived from: fewer than 3 corners, a corner off the
+    frame, edges that cross, or no area."""
+    if len(floor) < 3:
+        raise InvalidFloorError(f"a floor needs at least 3 corners, not {len(floor)}")
+    off = [p for p in floor if not (0 <= p[0] <= width and 0 <= p[1] <= height)]
+    if off:
+        raise InvalidFloorError(f"corner {off[0]} is outside the {width} x {height} px frame")
+    polygon = Polygon(floor)
+    if polygon.convex_hull.area == 0:
+        raise InvalidFloorError("the floor has no area: its corners are on one line")
+    if not polygon.is_valid:
+        raise InvalidFloorError("the floor's edges cross")
 
 
 def background_frame(run: RunFolder, samples: int) -> NDArray[np.uint8]:

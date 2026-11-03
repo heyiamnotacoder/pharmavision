@@ -92,6 +92,59 @@ a {
   pointer-events: none;
 }
 
+.zone-editor {
+  margin: 0 0 20px;
+}
+
+.zone-editor .hint {
+  margin: 0 0 8px;
+}
+
+.zone-editor svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  touch-action: none; /* a drag moves the corner, not the page */
+}
+
+.zone-editor svg.drawing {
+  cursor: crosshair;
+}
+
+.zone-editor polygon {
+  fill: none;
+  stroke-width: 3;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.zone-editor polygon.centre {
+  stroke-dasharray: 8 6;
+}
+
+.zone-editor .corner {
+  fill: rgba(80, 160, 255, 0.35);
+  stroke: #fff;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+  cursor: grab;
+}
+
+.zone-editor .corner:hover,
+.zone-editor .corner:focus-visible {
+  fill: rgba(80, 160, 255, 0.8);
+  outline: none;
+}
+
+.zone-editor figcaption button {
+  margin-right: 8px;
+}
+
+.status {
+  color: var(--accent);
+}
+
 figcaption {
   margin-top: 6px;
   font-size: 0.9rem;

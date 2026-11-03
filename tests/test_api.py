@@ -24,7 +24,7 @@ from pharmavision.segmenter import FrameMasks, Mask, Segmenter
 from pharmavision.segmenter.synthetic import SyntheticSegmenter
 
 from .judges import ScriptedJudge
-from .scenes import FLOOR, TEMPLATE, circle_walk, finished_run
+from .scenes import FLOOR, PX_PER_CM, TEMPLATE, circle_walk, finished_run
 from .studies import write_study
 from .videos import make_video
 
@@ -73,7 +73,7 @@ def test_a_new_run_stops_at_the_arena_gate(tmp_path: Path, video: Path) -> None:
     assert run["error"] is None
     assert run["read_only"] is False
     assert run["stages_done"] == ["ingest", "arena"]
-    assert set(run["artifacts"]) == {"manifest", "arena", "video"}
+    assert set(run["artifacts"]) == {"manifest", "arena", "background", "video"}
     arena = client.get(run["artifacts"]["arena"]).json()
     assert arena["confirmed"] is False
     assert client.get(run["artifacts"]["manifest"]).json()["source"]["filename"] == "trial.mp4"
@@ -127,7 +127,7 @@ def test_the_progress_stream_emits_one_event_per_stage(tmp_path: Path, video: Pa
     )
     run = client.get(f"/runs/{run_id}").json()
     assert set(run["artifacts"]) == {
-        "manifest", "arena", "track", "metrics", "events", "qc", "video"
+        "manifest", "arena", "background", "track", "metrics", "events", "qc", "video"
     }  # fmt: skip
     assert client.get(run["artifacts"]["arena"]).json()["confirmed"] is True
     assert client.get(run["artifacts"]["metrics"]).json()["distance_travelled_cm"] > 0
@@ -217,12 +217,81 @@ def test_a_video_shorter_than_the_protocol_fails_its_run_with_the_reason(
     assert client.post(f"/runs/{run_id}/arena/confirm").status_code == 409
 
 
-def test_a_floor_never_found_fails_the_run_at_the_arena(tmp_path: Path, video: Path) -> None:
-    client = api(tmp_path, segmenter=SyntheticSegmenter(floor=[]))
+def test_a_floor_never_found_waits_at_the_gate_for_one_drawn(tmp_path: Path, video: Path) -> None:
+    client = api(tmp_path, segmenter=SyntheticSegmenter(floor=[], trajectory=circle_walk(90)))
+    run_id = create_run(client, video)
+    run = client.get(f"/runs/{run_id}").json()
+    assert run["status"] == "awaiting zone confirmation"
+    assert run["stages_done"] == ["ingest", "arena"]
+    assert client.get(run["artifacts"]["arena"]).json()["floor_px"] == []
+
+    refused = client.post(f"/runs/{run_id}/arena/confirm")
+
+    assert refused.status_code == 422
+    assert "draw the floor" in refused.json()["detail"]
+    assert client.get(f"/runs/{run_id}").json()["status"] == "awaiting zone confirmation"
+
+    drawn = client.post(f"/runs/{run_id}/arena/confirm", json={"floor_px": FLOOR})
+
+    assert drawn.status_code == 202
+    assert client.get(f"/runs/{run_id}").json()["status"] == "done"
+    assert client.get(run["artifacts"]["arena"]).json()["px_per_cm"] == pytest.approx(PX_PER_CM)
+
+
+def test_an_edited_corner_is_confirmed_with_its_scale_before_the_run_resumes(
+    tmp_path: Path, video: Path
+) -> None:
+    client = api(tmp_path)
+    run_id = create_run(client, video)
+    edited = [*FLOOR[:2], (300.0, 300.0), FLOOR[3]]  # one corner pulled in by 30 px
+
+    response = client.post(f"/runs/{run_id}/arena/confirm", json={"floor_px": edited})
+
+    assert response.status_code == 202
+    arena = client.get(f"/runs/{run_id}/artifacts/arena").json()
+    assert arena["confirmed"] is True
+    assert arena["floor_px"] == [list(p) for p in edited]
+    # 300² less two 300 x 30 px triangles: 81,000 px² over 45 x 45 cm, √40 px/cm.
+    assert arena["px_per_cm"] == pytest.approx(40**0.5)
+    assert stages_and_status(stream(client, run_id)) == (
+        ["ingest", "arena", "track", "measure", "behaviours", "qc"],
+        "done",
+    )
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param({"floor_px": FLOOR[:2]}, id="two corners"),
+        pytest.param({"floor_px": [FLOOR[0], FLOOR[2], FLOOR[1], FLOOR[3]]}, id="a bow tie"),
+        pytest.param({"floor_px": [[30, 30], [330, 30], [330]]}, id="a corner without a y"),
+        pytest.param({"centre_px": FLOOR}, id="a centre zone drawn by hand"),
+    ],
+)
+def test_a_floor_the_zones_cannot_come_from_leaves_the_run_at_the_gate(
+    body: dict[str, object], tmp_path: Path, video: Path
+) -> None:
+    client = api(tmp_path)
     run_id = create_run(client, video)
 
+    response = client.post(f"/runs/{run_id}/arena/confirm", json=body)
+
+    assert response.status_code == 422
     run = client.get(f"/runs/{run_id}").json()
-    assert (run["status"], run["stage"], run["stages_done"]) == ("failed", "arena", ["ingest"])
+    assert run["status"] == "awaiting zone confirmation"
+    assert run["stages_done"] == ["ingest", "arena"]
+    assert client.get(run["artifacts"]["arena"]).json()["confirmed"] is False
+
+
+def test_the_background_frame_is_served_for_the_zone_editor(tmp_path: Path, video: Path) -> None:
+    client = api(tmp_path)
+    run_id = create_run(client, video)
+
+    response = client.get(client.get(f"/runs/{run_id}").json()["artifacts"]["background"])
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    assert response.content.startswith(b"\x89PNG")
 
 
 def test_an_unknown_template_is_refused_before_any_run_exists(tmp_path: Path, video: Path) -> None:
@@ -241,7 +310,7 @@ def test_an_unknown_template_is_refused_before_any_run_exists(tmp_path: Path, vi
 def test_an_unknown_run_is_not_found(run_id: str, tmp_path: Path) -> None:
     client = api(tmp_path, precomputed=tmp_path)
 
-    for path in ("", "/stream", "/video", "/artifacts/manifest"):
+    for path in ("", "/stream", "/video", "/background", "/artifacts/manifest"):
         assert client.get(f"/runs/{run_id}{path}").status_code == 404
 
 

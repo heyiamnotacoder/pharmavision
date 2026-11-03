@@ -7,6 +7,7 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
+import cv2
 import numpy as np
 import pytest
 from numpy.typing import NDArray
@@ -15,7 +16,7 @@ from shapely.geometry import Polygon
 from pharmavision.artifacts import ArenaSettings, Gap, MeasureSettings
 from pharmavision.pipeline import (
     ArenaNotConfirmedError,
-    ArenaNotFoundError,
+    InvalidFloorError,
     Stage,
     VideoTooShortError,
     confirm_arena,
@@ -70,13 +71,95 @@ def test_accepts_a_video_short_of_the_protocol_by_container_rounding(
     assert run.manifest().source.duration_s == pytest.approx(2.6, abs=0.1)
 
 
-def test_a_floor_never_found_leaves_no_run_folder(tmp_path: Path, runs_dir: Path) -> None:
+def test_a_floor_never_found_waits_at_the_gate_with_an_empty_arena(
+    tmp_path: Path, runs_dir: Path
+) -> None:
+    # SAM 3.1 drops a floor it scores under about 0.5: the scientist draws it instead (#16).
     video = make_video(tmp_path / "trial.mp4", seconds=4)
 
-    with pytest.raises(ArenaNotFoundError):
-        start_run(video, TEMPLATE, SyntheticSegmenter(floor=[]), runs_dir)
+    run = start_run(video, TEMPLATE, SyntheticSegmenter(floor=[]), runs_dir)
 
-    assert list(runs_dir.iterdir()) == []
+    arena = run.arena()
+    assert (arena.floor_px, arena.centre_px, arena.confirmed) == ([], [], False)
+    assert run.manifest().models["arena"] == "synthetic"
+    with pytest.raises(ArenaNotConfirmedError):
+        run_stage(run, Stage.TRACK, SyntheticSegmenter(), ScriptedJudge())
+
+
+def test_an_empty_arena_cannot_be_confirmed_without_a_floor(tmp_path: Path, runs_dir: Path) -> None:
+    video = make_video(tmp_path / "trial.mp4", seconds=4)
+    run = start_run(video, TEMPLATE, SyntheticSegmenter(floor=[]), runs_dir)
+
+    with pytest.raises(InvalidFloorError, match="draw the floor"):
+        confirm_arena(run)
+
+    assert not run.arena().confirmed
+
+
+def test_an_edited_floor_moves_the_centre_zone_and_the_scale(
+    tmp_path: Path, runs_dir: Path
+) -> None:
+    video = make_video(tmp_path / "trial.mp4", seconds=4)
+    run = start_run(video, TEMPLATE, SyntheticSegmenter(floor=FLOOR), runs_dir)
+    # The scientist pulls two corners in: a 270 px square, 6 cm/px of 45 cm.
+    edited = [(30.0, 30.0), (300.0, 30.0), (300.0, 300.0), (30.0, 300.0)]
+
+    confirm_arena(run, edited)
+
+    arena = run.arena()
+    assert arena.confirmed
+    assert arena.floor_px == edited
+    assert arena.px_per_cm == pytest.approx(6.0)
+    # The centre: half the floor's area (270² / 2 = 36,450 px²), about the floor's centre.
+    centre = Polygon(arena.centre_px)
+    assert centre.area == pytest.approx(36_450)
+    assert (centre.centroid.x, centre.centroid.y) == pytest.approx((165.0, 165.0))
+
+
+def test_a_drawn_floor_confirms_an_empty_arena(tmp_path: Path, runs_dir: Path) -> None:
+    video = make_video(tmp_path / "trial.mp4", seconds=4)
+    run = start_run(video, TEMPLATE, SyntheticSegmenter(floor=[]), runs_dir)
+
+    confirm_arena(run, FLOOR)
+
+    assert run.arena().px_per_cm == pytest.approx(PX_PER_CM)
+    run_stage(run, Stage.TRACK, SyntheticSegmenter(), ScriptedJudge())  # the gate is open
+
+
+@pytest.mark.parametrize(
+    ("floor", "reason"),
+    [
+        pytest.param([(30.0, 30.0), (330.0, 30.0)], "at least 3 corners", id="two corners"),
+        pytest.param([*FLOOR[:3], (30.0, 361.0)], "outside the 360 x 360", id="off the frame"),
+        pytest.param([FLOOR[0], FLOOR[2], FLOOR[1], FLOOR[3]], "cross", id="a bow tie"),
+        pytest.param([(30.0, 30.0), (180.0, 30.0), (330.0, 30.0)], "no area", id="a line"),
+    ],
+)
+def test_a_floor_the_zones_cannot_come_from_is_refused(
+    floor: list[tuple[float, float]], reason: str, tmp_path: Path, runs_dir: Path
+) -> None:
+    video = make_video(tmp_path / "trial.mp4", seconds=4)
+    run = start_run(video, TEMPLATE, SyntheticSegmenter(floor=FLOOR), runs_dir)
+    before = run.arena()
+
+    with pytest.raises(InvalidFloorError, match=reason):
+        confirm_arena(run, floor)
+
+    assert run.arena() == before
+
+
+def test_the_editor_gets_the_background_frame_the_floor_was_looked_for_on(
+    tmp_path: Path, runs_dir: Path
+) -> None:
+    video = make_video(tmp_path / "dim.mp4", seconds=4, floor_box=(100, 100, 160, 160))
+
+    run = start_run(video, TEMPLATE, SyntheticSegmenter(floor=[]), runs_dir)
+
+    background = cv2.imread(str(run.background_path))
+    assert background is not None
+    assert background.shape == (360, 360, 3)
+    # Plain, not equalised: the scientist sees the floor as the camera did.
+    assert background[180, 180].mean() - background[180, 50].mean() == pytest.approx(8, abs=3)
 
 
 class ImageSpy(SyntheticSegmenter):

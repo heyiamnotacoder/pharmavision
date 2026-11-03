@@ -8,26 +8,43 @@ export type Point = [number, number];
 
 export type JobStatus = "queued" | "running" | "awaiting zone confirmation" | "done" | "failed";
 
+/** Statuses a run rests in until a person acts, or for good (as `jobs.RESTING`). */
+export const RESTING: ReadonlySet<JobStatus> = new Set([
+  "awaiting zone confirmation",
+  "done",
+  "failed",
+]);
+
 export interface RunView {
   run_id: string;
   status: JobStatus;
+  /** The stage running now; after a failure, the stage that failed. */
+  stage: string | null;
   error: string | null;
   read_only: boolean;
   stages_done: string[];
   /** The URL serving each artifact the run has written so far, by name. */
   artifacts: Partial<
-    Record<"manifest" | "video" | "arena" | "track" | "metrics" | "events" | "qc", string>
+    Record<
+      "manifest" | "video" | "background" | "arena" | "track" | "metrics" | "events" | "qc",
+      string
+    >
   >;
 }
 
 export interface Manifest {
+  /** The centre zone: the floor shrunk about its centroid to this fraction of its area. */
+  template: { centre_area_fraction: number };
   measure: { version: number };
   video: { width: number; height: number; fps: number; n_frames: number };
 }
 
+/** Empty (no floor, no centre, `px_per_cm` 0) when SAM 3.1 found no floor to show. */
 export interface Arena {
   floor_px: Point[];
+  /** Derived from the floor by the backend; never drawn by hand. */
   centre_px: Point[];
+  px_per_cm: number;
   confirmed: boolean;
 }
 
@@ -153,9 +170,30 @@ export async function getJson<T>(path: string): Promise<T> {
   return (await response.json()) as T;
 }
 
+/** The arena gate: confirm the zones on `floor`, as the scientist left it. The API derives the
+ * centre zone and the scale from it, then runs every later stage. A refusal throws with the
+ * API's reason (a floor whose edges cross, a run no longer at the gate). */
+async function confirmArena(runId: string, floor: readonly Point[]): Promise<RunView> {
+  const path = `/runs/${encodeURIComponent(runId)}/arena/confirm`;
+  const response = await fetch(apiUrl(path), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ floor_px: floor }),
+  });
+  const body = (await response.json().catch(() => null)) as { detail?: unknown } | null;
+  if (!response.ok) {
+    const detail = body?.detail;
+    throw new Error(
+      typeof detail === "string" ? detail : `POST ${path}: ${String(response.status)}`,
+    );
+  }
+  return body as RunView;
+}
+
 export const api = {
   runs: () => getJson<RunView[]>("/runs"),
   run: (id: string) => getJson<RunView>(`/runs/${encodeURIComponent(id)}`),
+  confirmArena,
   studies: () => getJson<StudyView[]>("/studies"),
   study: (id: string) => getJson<StudyView>(`/studies/${encodeURIComponent(id)}`),
 };

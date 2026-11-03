@@ -57,6 +57,8 @@ def main() -> None:
         args.runs_dir.mkdir(parents=True, exist_ok=True)
         run = start_run(args.video, OPEN_FIELD, segmenter, args.runs_dir)
         print(f"{run.path}\n{run.arena().model_dump_json(indent=2)}")
+        if not run.arena().floor_px:
+            print("no floor found: draw it in the zone editor (`serve`) before `finish`")
     else:
         run = RunFolder(args.run_dir)
         confirm_arena(run)

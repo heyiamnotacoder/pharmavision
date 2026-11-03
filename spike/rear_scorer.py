@@ -19,6 +19,7 @@ raters against each other. Needs `python -m spike.rear_recall` first (the train 
 """
 
 import json
+import shutil
 import sys
 from dataclasses import asdict, dataclass
 from itertools import combinations
@@ -35,7 +36,6 @@ from pharmavision.measure.rears import rear_score
 from pharmavision.pipeline import RunFolder, Stage, confirm_arena, run_stage, start_run
 from pharmavision.segmenter.config import make_segmenter
 from pharmavision.segmenter.meta_api import MetaApiSettings
-from pharmavision.stages.arena import ArenaNotFoundError
 from pharmavision.templates import OPEN_FIELD
 from spike.data import LABELS, SPLIT, VIDEOS, download
 from spike.rear_recall import OUT as RUNS
@@ -300,11 +300,11 @@ def track() -> None:
         download(video_id)
         for prompt in FLOOR_PROMPTS:
             template = OPEN_FIELD.model_copy(update={"floor_prompt": prompt})
-            try:
-                run = start_run(VIDEOS / f"{video_id}.mp4", template, segmenter, RUNS / "runs")
+            run = start_run(VIDEOS / f"{video_id}.mp4", template, segmenter, RUNS / "runs")
+            if run.arena().floor_px:
                 break
-            except ArenaNotFoundError:
-                print(f"{video_id}: no {prompt!r}", flush=True)
+            shutil.rmtree(run.path)  # an empty arena: no floor for this prompt
+            print(f"{video_id}: no {prompt!r}", flush=True)
         else:
             print(f"{video_id}: skipped, no arena found", flush=True)
             continue
