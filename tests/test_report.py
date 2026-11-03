@@ -294,7 +294,20 @@ def test_a_run_whose_floor_was_found_with_another_prompt_is_the_same_protocol(
 
     report = study_report(study, runs_dir, ScriptedJudge(drafts=[HONEST]))
 
-    assert report.passed
+    assert report.passed, [n.text for n in report.struck]
+
+
+def test_a_study_whose_runs_used_another_arena_size_gets_no_report(
+    tmp_path: Path, runs_dir: Path
+) -> None:
+    study = fixture_study(tmp_path, runs_dir)
+    odd = RunFolder(runs_dir / "diazepam-2")
+    manifest = odd.manifest()
+    template = manifest.template.model_copy(update={"arena_width_cm": 50.0})
+    odd.write_manifest(manifest.model_copy(update={"template": template}))
+
+    with pytest.raises(StudyNotReadyError, match="B09"):
+        study_report(study, runs_dir, ScriptedJudge(drafts=[HONEST]))
 
 
 def test_a_commentary_message_beside_the_draft_is_not_part_of_the_report(

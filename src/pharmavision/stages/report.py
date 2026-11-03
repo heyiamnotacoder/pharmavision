@@ -103,17 +103,17 @@ def _load(study: StudyFolder, runs_dir: Path) -> _Study:
     differing = [code for code, m in manifests.items() if _protocol(m) != _protocol(first)]
     if differing:
         raise StudyNotReadyError(
-            f"trials recorded or judged differently (template, video, behaviour settings or "
-            f"models): {', '.join(differing)} against {design.trials[0].blinding_code}"
+            f"trials recorded or judged differently (template but the floor prompt, video, "
+            f"behaviour settings or models):{', '.join(differing)} against {design.trials[0].blinding_code}"
         )
     return _Study(design, trials, stats, runs, first)
 
 
 def _protocol(manifest: Manifest) -> tuple[object, ...]:
     """What the protocol tool reports from one manifest; the stats stage already checked that
-    the measure and QC settings agree. Not the floor prompt: it only found the arena, which the
-    scientist then confirmed, and the eval tries others when the first finds no floor."""
-    template = manifest.template.model_copy(update={"floor_prompt": ""})
+    the measure and QC settings agree. Not the floor prompt: it only found the arena, which was
+    confirmed before tracking, and the protocol tool does not report it."""
+    template = manifest.template.model_dump(exclude={"floor_prompt"})
     return (template, manifest.video.fps, manifest.behaviours, manifest.models)
 
 

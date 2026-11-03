@@ -349,7 +349,8 @@ purity.
     out at all (NFR-1).
   - The stage refuses a study whose trials differ in template, video fps, behaviour settings
     or models (the stats stage already refuses differing measure or QC settings), since the
-    methods describe one protocol.
+    methods describe one protocol. The floor prompt doesn't count: it only found the arena,
+    confirmed before tracking, and the protocol tool doesn't report it.
   - **Agent loop:** each Responses request offers the five tools as strict `function` tools;
     each `function_call` (read from its `response.output_item.done` event) is answered with a
     `function_call_output` in the next request, until a response writes text. At most
