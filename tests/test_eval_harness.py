@@ -7,9 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from eval.harness import Paths, evaluate_video, summarise
+from eval.harness import FloorNotFoundError, Paths, evaluate_video, summarise
 from eval.spend import Call, Usage
-from pharmavision.pipeline import ArenaNotFoundError
 from pharmavision.segmenter.synthetic import SyntheticSegmenter
 
 from .dlc_csv import write_dlc
@@ -89,19 +88,20 @@ def test_the_next_floor_prompt_is_tried_when_sam_finds_no_square_floor(
 def test_a_video_with_no_floor_found_still_logs_its_spend(
     paths: Paths, video: Path, dlc_csv: Path
 ) -> None:
-    with pytest.raises(ArenaNotFoundError):
+    with pytest.raises(FloorNotFoundError):
         evaluate_video("OFT_12", video, dlc_csv, SyntheticSegmenter(), FakeMeter(), paths, TEMPLATE)
 
     (logged,) = [json.loads(line) for line in paths.spend_log.read_text().splitlines()]
     assert logged["video_id"] == "OFT_12"
     assert logged["finished"] is False
     assert not paths.result("OFT_12").exists()
+    assert not (paths.runs / "OFT_12").exists()
 
 
 def test_the_summary_lists_eval_videos_with_no_result_and_sums_every_attempt(
     paths: Paths, video: Path, dlc_csv: Path
 ) -> None:
-    with pytest.raises(ArenaNotFoundError):
+    with pytest.raises(FloorNotFoundError):
         evaluate_video("OFT_12", video, dlc_csv, SyntheticSegmenter(), FakeMeter(), paths, TEMPLATE)
     segmenter = SyntheticSegmenter(floor=FLOOR, trajectory=walk)
     evaluate_video("OFT_11", video, dlc_csv, segmenter, FakeMeter(), paths, TEMPLATE)

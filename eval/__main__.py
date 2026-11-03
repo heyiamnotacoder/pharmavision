@@ -21,11 +21,17 @@ import cv2
 
 from pharmavision.artifacts import IngestSettings
 from pharmavision.model_api import OpenAiTransport
-from pharmavision.pipeline import ArenaNotFoundError
 from pharmavision.segmenter.meta_api import MetaApiSegmenter, MetaApiSettings
 
 from .guard import check_labels_untracked
-from .harness import Paths, TrackingSummary, evaluate_video, spent_by_video, summarise
+from .harness import (
+    FloorNotFoundError,
+    Paths,
+    TrackingSummary,
+    evaluate_video,
+    spent_by_video,
+    summarise,
+)
 from .spend import MeteredTransport, VideoPlan, format_projection, project
 from .split import Split, check_split, load_split
 from .sturman import LABELS, dlc_files, fetch_dlc, fetch_labels, fetch_video, video_path
@@ -89,7 +95,7 @@ def track(yes: bool, paths: Paths) -> TrackingSummary:
         video, dlc_csv = fetch_video(video_id), fetch_dlc(dlc[video_id])
         try:
             result = evaluate_video(video_id, video, dlc_csv, segmenter, meter, paths)
-        except ArenaNotFoundError as error:
+        except FloorNotFoundError as error:
             print(f"{video_id}: skipped, {error}", flush=True)
             continue
         tracking = result.tracking
