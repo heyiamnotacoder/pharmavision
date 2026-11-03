@@ -6,6 +6,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from pharmavision.api import ApiSettings, create_app
@@ -31,6 +32,25 @@ from .videos import make_video
 SCENE = SyntheticSegmenter(floor=FLOOR, trajectory=circle_walk(radius_px=90))
 
 
+def make_app(
+    tmp_path: Path,
+    segmenter: Segmenter = SCENE,
+    judge: Judge | None = None,
+    precomputed: Path | None = None,
+    max_upload_bytes: int = 1 << 30,
+    read_only: bool = False,
+) -> FastAPI:
+    settings = ApiSettings(
+        runs_dir=tmp_path / "runs",
+        studies_dir=tmp_path / "studies",
+        database=tmp_path / "jobs.sqlite3",
+        precomputed_runs_dir=precomputed,
+        max_upload_bytes=max_upload_bytes,
+        read_only=read_only,
+    )
+    return create_app(settings, segmenter, judge or ScriptedJudge(), {"open_field": TEMPLATE})
+
+
 def api(
     tmp_path: Path,
     segmenter: Segmenter = SCENE,
@@ -38,15 +58,7 @@ def api(
     precomputed: Path | None = None,
     max_upload_bytes: int = 1 << 30,
 ) -> TestClient:
-    settings = ApiSettings(
-        runs_dir=tmp_path / "runs",
-        studies_dir=tmp_path / "studies",
-        database=tmp_path / "jobs.sqlite3",
-        precomputed_runs_dir=precomputed,
-        max_upload_bytes=max_upload_bytes,
-    )
-    app = create_app(settings, segmenter, judge or ScriptedJudge(), {"open_field": TEMPLATE})
-    return TestClient(app)
+    return TestClient(make_app(tmp_path, segmenter, judge, precomputed, max_upload_bytes))
 
 
 def create_run(client: TestClient, video: Path, template: str = "open_field") -> str:
