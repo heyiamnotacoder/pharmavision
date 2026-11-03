@@ -3,8 +3,8 @@
 Open-source AI lab for behavioural pharmacology: rodent test video in → scored, statistically
 analysed, ARRIVE-compliant results section out.
 
-**SAM 3.1 sees, Python measures, Muse Spark judges.** No model writes a number into the report:
-every number in the generated prose must match a computed value, or the report fails.
+**SAM 3.1 sees, Python measures, Muse Spark judges.** Every number in model-written prose must
+match a computed value, or that prose fails the number audit.
 
 > **Research tool only.** Not validated for regulatory GLP studies. Rearing is not counted
 > (see [Limitations](#limitations)).
@@ -16,16 +16,20 @@ Nov 4, 2026.
 
 ```
 video ─▶ 1 ingest ─▶ 2 arena ─▶ 3 track ─▶ 4 measure ─▶ 5 behaviours ─▶ 6 QC ─▶ 7 stats ─▶ 8 report
-                      (sees)     (sees)    (measures)     (judges)      (both)  (measures)  (judges)
                          ▲                                                                    │
                    human confirms zones                                          number audit ┘
 ```
 
 | Layer | Who | Does | Never does |
 |---|---|---|---|
-| **Sees** | SAM 3.1 | Segments the arena floor from a text prompt; tracks the animal in every frame from the prompt "mouse", with no training data; looks for hands in flagged windows | Produce a number for the report |
+| **Sees** | SAM 3.1 | Segments the arena floor from a text prompt. Tracks the animal in every frame from a text prompt, with no training data. Looks for hands in flagged windows. | Produce a number for the report |
 | **Measures** | Deterministic Python | Every metric (distance, velocity, centre time and entries, thigmotaxis, immobility), every QC rule, every statistic, with the test chosen by a fixed rule | Call a model |
 | **Judges** | Muse Spark | Gives a second opinion on each rear-candidate clip, reviews flagged QC windows, writes the ARRIVE 2.0 methods and results through read-only tools | Compute anything |
+
+A stage can use more than one layer, but each piece of it belongs to one. The arena is found by
+SAM 3.1, and its centre zone and px/cm scale are derived in Python. QC runs deterministic rules,
+then SAM 3.1 and Muse Spark review the flagged windows. The report is written by Muse Spark and
+then gated by the deterministic number audit.
 
 - **The arena gate.** The scientist confirms or redraws the floor in the zone editor. Nothing
   downstream runs on an unconfirmed arena.
@@ -45,42 +49,47 @@ Details: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Scope and acceptance cr
 
 On the Sturman et al. 2020 open field videos: a fixed split of 6 train and 14 eval videos
 (`eval/split.json`), three human raters, and DeepLabCut output as a reference tracker. Full
-tables, per video: [`eval/REPORT.md`](eval/REPORT.md), made by `python -m eval report`.
+tables, per video: [`eval/REPORT.md`](eval/REPORT.md), made by `python -m eval report`. The
+figures below are from measure settings v4, Nov 3, 2026; the report is the source if they differ.
 
 | What | Result on the 14 eval videos | Reference | Verdict |
 |---|---|---|---|
 | Frames tracked (SAM 3.1, zero-shot) | 98.1–99.8% per video | target ≥ 95% | **met** |
-| Centroid vs DeepLabCut body centre | median 1.1–1.7 cm, p95 2.4–3.0 cm, ≤ 0.2% of frames ≥ 5 cm apart | DeepLabCut is a reference, not ground truth | reported |
-| Rear count agreement, ICC(2,1) | 0.02–0.09 against each rater | raters against each other: 0.87–0.91 | **not met** |
-| Rear events, F1 (± 0.5 s) | 0.60–0.62 against each rater | raters against each other: 0.87–0.89 | **not met** |
-| Rear candidate recall (every candidate) | 0.88–0.89 against each rater | — | the windows catch most rears |
+| Centroid vs DeepLabCut body centre | median 1.1–1.7 cm, p95 2.4–3.0 cm, ≤ 0.2% of frames ≥ 5 cm apart | DeepLabCut is a reference, not ground truth | report only |
+| Rear count, ICC(2,1): candidates scoring ≥ 0.55 (an eval-only count) | 0.02–0.09 against each rater | raters against each other: 0.87–0.91 | **not met** |
+| Rear events, F1 (± 0.5 s): candidates scoring ≥ 0.55 | 0.60–0.62 against each rater | raters against each other: 0.87–0.89 | **not met** |
+| Rear events: every candidate window | recall 0.88–0.89, precision 0.40–0.41 against each rater | — | report only |
+| Number-audit pass rate | not measured yet: no study report has been made on the eval videos | 100% | — |
 
-Rearing failed its bar, so **the pipeline makes no rear count**
+The application promised rear counts that agree with the raters as well as they agree with each
+other. That was measured and is **not met**, so **the pipeline makes no rear count**
 ([ADR 0003](docs/adr/0003-no-rear-counts-score-as-evidence.md)). Each candidate window keeps its
 measured score and Muse Spark's opinion, shown per window, for a person to check.
 
 ## Limitations
 
 - **No rear count**, as above. The report says it abstains on rearing and why.
-- **Muse Spark's rear labels are not trusted.** Per clip it agreed with the raters at κ
-  0.04–0.30 and changed 1 label in 4 when asked again. It is a second opinion beside the score.
+- **Muse Spark's rear labels are not trusted.** On 80 held-out clips in the spike it agreed
+  with the raters at κ 0.04 zero-shot and 0.30 few-shot, and changed about 1 label in 4 when
+  asked again. It is a second opinion beside the score. Its agreement on the eval split is not
+  measured yet.
 - **Open field only.** Elevated plus maze, forced swim and two-animal tests are not built.
 - **One animal, a fixed overhead camera, a square arena of known size.**
 - **QC window exclusions are listed but don't change the metrics yet**: the metrics are computed
   before QC. A whole-trial exclusion does leave the trial out of the stats.
 - **The overlay shows the raw track**, not the filtered path the metrics come from, so it can
   show jitter the metrics never saw.
-- **New videos need the Meta Model API** (`MODEL_API_KEY`). The validation used the Contributor
-  tier on public data, where Meta may train on prompts and outputs; a lab's own videos should use
-  the standard tier, the default.
+- **New videos need the Meta Model API** (`MODEL_API_KEY`). The spike and development on the
+  public Sturman clips used the Contributor tier, where Meta may train on prompts and outputs. A
+  lab's own videos should use the standard tier, the default.
 
 ## Run it
 
-Needs [uv](https://docs.astral.sh/uv/), Node 22 and ffmpeg.
+Needs [uv](https://docs.astral.sh/uv/), Node 22.22.2 or later, and ffmpeg.
 
 ```bash
 uv sync
-scripts/check.sh            # ruff, pyright, pytest, and the frontend's typecheck, lint, tests and build
+scripts/check.sh            # the same gates CI runs
 ```
 
 The API, with any finished run folders served read-only (needs `MODEL_API_KEY` in `.env` for
@@ -104,10 +113,13 @@ uv run python -m pharmavision start VIDEO.mp4     # ingest + arena; stops at the
 uv run python -m pharmavision finish RUN_DIR      # confirm the arena, then every later stage
 ```
 
-The eval harness (`fetch` downloads the Sturman data into the git-ignored `eval/data/`):
+The eval harness. `fetch` downloads the Sturman data into the git-ignored `eval/data/`. `plan`
+prints the projected SAM 3.1 spend. `track` calls SAM 3.1 (it needs `MODEL_API_KEY` and asks
+before it spends). `report` calls no model.
 
 ```bash
 uv run python -m eval fetch
+uv run python -m eval plan
 uv run python -m eval track
 uv run python -m eval report
 ```
