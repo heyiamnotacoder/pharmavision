@@ -439,6 +439,23 @@ the demo and write-up, the same way PaedScale published its validation table.
     so a demo study over precomputed runs needs them there (T13).
 - **Frontend:** video player with a canvas overlay (masks, trajectory, zones), a zone editor, an
   event timeline, a metrics table and the rendered report. This screen is the demo.
+  - `frontend/`: Vite + React + TypeScript (strict), checked by `scripts/check.sh`
+    (typecheck, ESLint, Vitest, build). It reads the API at `VITE_API_BASE` (default `/api`,
+    which the dev server proxies to `:8000`). Two screens, by URL hash: the run list and
+    `#/runs/<id>`, the run viewer (T9b).
+  - **Overlay sync:** the canvas has the normalised video's pixel size, so artifact pixels are
+    canvas pixels. Each frame is drawn inside `requestVideoFrameCallback`, keyed by the frame
+    index of the presented frame (`floor(mediaTime × fps)`), and again on `seeked`. Checked on
+    Nov 3 against a synthetic run whose video shows a disc on the tracked path: within 1 px on
+    every presented frame of playback.
+  - The overlay decodes each frame's COCO RLE mask in the browser and draws the zones and the
+    last 10 s of the path; a gap breaks the path, never bridged. The path is the raw tracked
+    centroids, not the median-filtered, gap-bridged path the measure stage computes metrics
+    from, so it can show jitter and breaks the metrics never saw.
+  - Missing data stays visible: a run's later artifacts load only once the run view lists
+    them, and the viewer says which are missing ("no zones yet", "not tracked yet", "no
+    metrics yet") instead of failing. The metric units copy `METRIC_UNITS` by hand until the
+    API serves them.
 - **Deploy:** API on Render or Modal (CPU). SAM on Modal GPU if self-hosted. Static frontend.
   Precomputed demo runs ship with the app so the demo never waits on a cold GPU.
 

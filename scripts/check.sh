@@ -14,6 +14,7 @@ if [[ -f frontend/package-lock.json ]]; then
   echo "▶ frontend: install";   npm --prefix frontend ci --no-audit --no-fund
   echo "▶ frontend: typecheck"; npm --prefix frontend run typecheck
   echo "▶ frontend: lint";      npm --prefix frontend run lint
+  echo "▶ frontend: format";    npm --prefix frontend run format:check
   echo "▶ frontend: test";      npm --prefix frontend run test --if-present
   echo "▶ frontend: build";     npm --prefix frontend run build
 fi

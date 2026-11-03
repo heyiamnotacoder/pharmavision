@@ -1,0 +1,189 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  api,
+  apiUrl,
+  getJson,
+  type Arena,
+  type Manifest,
+  type Metrics,
+  type RunView,
+  type Track,
+} from "./api";
+import { frameAt } from "./frames";
+import { COLOURS, drawPolygon, drawPathTail, maskImage, pathTail, type Position } from "./overlay";
+import { MetricsTable } from "./MetricsTable";
+
+/** How much of the path the overlay keeps behind the animal. */
+const TAIL_SECONDS = 10;
+
+/** A run that has been ingested: its manifest and video exist. Each later artifact is null
+ * until its stage has run, and the viewer says so instead of failing. */
+interface RunData {
+  manifest: Manifest;
+  videoUrl: string;
+  arena: Arena | null;
+  track: Track | null;
+  metrics: Metrics | null;
+}
+
+class NotIngestedError extends Error {}
+
+/** The artifact at the URL the run view gives, or null if the run has not written it. */
+async function optional<T>(url: string | undefined): Promise<T | null> {
+  return url === undefined ? null : getJson<T>(url);
+}
+
+async function loadRun(runId: string): Promise<RunData> {
+  const { artifacts }: RunView = await api.run(runId);
+  if (artifacts.manifest === undefined || artifacts.video === undefined) {
+    throw new NotIngestedError(`run ${runId} has not been ingested yet`);
+  }
+  const [manifest, arena, track, metrics] = await Promise.all([
+    getJson<Manifest>(artifacts.manifest),
+    optional<Arena>(artifacts.arena),
+    optional<Track>(artifacts.track),
+    optional<Metrics>(artifacts.metrics),
+  ]);
+  return { manifest, videoUrl: apiUrl(artifacts.video), arena, track, metrics };
+}
+
+/** Mount with `key={runId}`: its state belongs to one run. */
+export function RunViewer({ runId }: { runId: string }) {
+  const [data, setData] = useState<RunData | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    loadRun(runId).then(
+      (d) => {
+        if (live) setData(d);
+      },
+      (e: unknown) => {
+        if (live) setError(e instanceof NotIngestedError ? e.message : String(e));
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [runId]);
+
+  if (error)
+    return (
+      <p className="error">
+        Could not show run {runId}: {error}
+      </p>
+    );
+  if (!data) return <p>Loading run {runId}…</p>;
+  return (
+    <section className="viewer">
+      <h2>Run {runId}</h2>
+      <OverlayPlayer {...data} />
+      {data.metrics ? (
+        <MetricsTable metrics={data.metrics} measureVersion={data.manifest.measure.version} />
+      ) : (
+        <p className="missing">No metrics yet: the run has not reached the measure stage.</p>
+      )}
+    </section>
+  );
+}
+
+function OverlayPlayer({ manifest, videoUrl, arena, track }: Omit<RunData, "metrics">) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [frame, setFrame] = useState(0);
+  const { width, height, fps, n_frames: nFrames } = manifest.video;
+
+  // Indexed by frame: `Track.frames[i]` is frame i (see `Track` in api.ts).
+  const positions = useMemo<(Position | null)[]>(
+    () =>
+      track?.frames.map((f) =>
+        f.detected && f.x_px !== null && f.y_px !== null ? { x: f.x_px, y: f.y_px } : null,
+      ) ?? [],
+    [track],
+  );
+
+  // Draw each frame's overlay inside the video's frame callback, which runs before that frame
+  // is composited: going through React state would land the overlay a frame late. The
+  // caption's frame number goes through state; it can afford to.
+  useEffect(() => {
+    const video = videoRef.current;
+    const ctx = canvasRef.current?.getContext("2d");
+    if (!video || !ctx) return;
+    const tailFrames = Math.round(TAIL_SECONDS * fps);
+    let drawn = -1;
+    const draw = (seconds: number) => {
+      const index = frameAt(seconds, fps, nFrames);
+      if (index === drawn) return;
+      drawn = index;
+      ctx.clearRect(0, 0, width, height);
+      const record = track?.frames[index];
+      if (record?.mask_rle) ctx.putImageData(maskImage(record.mask_rle, width, height), 0, 0);
+      if (arena) {
+        drawPolygon(ctx, arena.floor_px, COLOURS.floor);
+        drawPolygon(ctx, arena.centre_px, COLOURS.centre);
+      }
+      drawPathTail(ctx, pathTail(positions, index, tailFrames));
+      setFrame(index);
+    };
+    let handle = 0;
+    const onFrame = (_now: number, meta: VideoFrameCallbackMetadata) => {
+      draw(meta.mediaTime);
+      handle = video.requestVideoFrameCallback(onFrame);
+    };
+    const onSeek = () => {
+      draw(video.currentTime);
+    };
+    draw(video.currentTime);
+    handle = video.requestVideoFrameCallback(onFrame);
+    video.addEventListener("seeked", onSeek);
+    return () => {
+      video.cancelVideoFrameCallback(handle);
+      video.removeEventListener("seeked", onSeek);
+    };
+  }, [arena, track, positions, width, height, fps, nFrames]);
+
+  const record = track?.frames[frame];
+  return (
+    <figure className="player">
+      <div className="stage" style={{ aspectRatio: `${String(width)} / ${String(height)}` }}>
+        <video ref={videoRef} src={videoUrl} controls muted playsInline />
+        <canvas ref={canvasRef} width={width} height={height} aria-label="Tracking overlay" />
+      </div>
+      <figcaption>
+        <span data-testid="frame">
+          Frame {frame + 1} / {nFrames}
+        </span>
+        {track ? (
+          record?.detected ? null : (
+            <span className="gap"> · animal not found (gap)</span>
+          )
+        ) : (
+          <span className="missing"> · not tracked yet</span>
+        )}
+        {!arena ? (
+          <span className="missing"> · no zones yet</span>
+        ) : arena.confirmed ? null : (
+          <span className="missing"> · zones not confirmed</span>
+        )}
+        <span className="legend">
+          <span>
+            <i style={{ borderColor: COLOURS.floor }} />
+            floor
+          </span>
+          <span>
+            <i style={{ borderColor: COLOURS.centre }} />
+            centre zone
+          </span>
+          <span>
+            <i className="mask" />
+            mask
+          </span>
+          <span title="Raw tracked centroids: the metrics use a smoothed path">
+            <i className="tail" />
+            path, last {TAIL_SECONDS} s (raw)
+          </span>
+        </span>
+      </figcaption>
+    </figure>
+  );
+}

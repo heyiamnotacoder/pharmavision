@@ -20,6 +20,13 @@ Serve the API (needs `MODEL_API_KEY` in `.env` for anything not already in `runs
 uv run python -m pharmavision serve --precomputed path/to/finished-runs
 ```
 
+Run the frontend beside it (Vite on `localhost:5173`, which proxies `/api` to the API on `:8000`):
+
+```bash
+npm --prefix frontend ci
+npm --prefix frontend run dev
+```
+
 ## Licence and credits
 
 - Code: MIT (see `LICENSE`).
