@@ -86,6 +86,10 @@ class ApiSettings(BaseModel):
     """The SAM 3.1 Files API takes up to 1 GiB per video."""
     stream_poll_s: float = Field(default=0.5, gt=0)
     """How often an open progress stream looks for new stages."""
+    read_only: bool = False
+    """The public demo: every request that would start a job (a new run, an arena
+    confirmation, a study report) is refused, so no visitor can spend the Model API budget or
+    replace the demo study's report. Runs, studies and their artifacts are still served."""
 
 
 class RunView(BaseModel):
@@ -148,6 +152,15 @@ def create_app(
         limit = settings.max_upload_bytes + _FORM_OVERHEAD_BYTES
         if request.method == "POST" and length.isdigit() and int(length) > limit:
             return JSONResponse({"detail": too_large}, status_code=413)
+        return await call_next(request)
+
+    @app.middleware("http")
+    async def refuse_jobs_when_read_only(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        """Every POST starts a job; a read-only site refuses them all, before any body is read."""
+        if settings.read_only and request.method == "POST":
+            return JSONResponse({"detail": "this site is read-only"}, status_code=403)
         return await call_next(request)
 
     def find(run_id: str) -> tuple[RunFolder, bool]:

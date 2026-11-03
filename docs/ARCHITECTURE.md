@@ -523,8 +523,12 @@ report: eval/split.json ✓ → per eval video with a tracked run (eval/data/run
   - **Precomputed runs** (`--precomputed DIR`) are listed and served beside the live ones
     with `read_only: true`. Their stages and status are read from the artifacts present (a
     folder stopped at the gate reads as `awaiting zone confirmation`). Confirming one is
-    refused, and nothing calls a model. A study report reads its runs from `runs_dir` only,
-    so a demo study over precomputed runs needs them there (T13).
+    refused, and nothing calls a model. A study report job reads its runs from `runs_dir`
+    only, so the demo ships its study with the report already made, and serves it read-only.
+  - **Read-only site** (`ApiSettings.read_only`, `serve --read-only`, T13): every POST (a
+    new run, an arena confirmation, a study report) is refused with 403 before its body is
+    read, so no visitor can spend the Model API budget or leave the demo study `failed`.
+    Runs, studies and their artifacts are served as usual.
 - **Frontend:** video player with a canvas overlay (masks, trajectory, zones), a zone editor, an
   event timeline, a metrics table and the rendered report. This screen is the demo.
   - `frontend/`: Vite + React + TypeScript (strict), checked by `scripts/check.sh`
@@ -566,12 +570,12 @@ report: eval/split.json ✓ → per eval video with a tracked run (eval/data/run
 - **Deploy (T13):** one Docker web service on Render (`Dockerfile`, `render.yaml`), one
   process. `serve --frontend frontend/dist` mounts the API under `/api`, where the built
   frontend's default `VITE_API_BASE` reaches it, and serves the frontend at `/`
-  (`api.with_frontend`). SAM 3.1 and Muse Spark stay on the Meta API (`MODEL_API_KEY`, set on
-  the host). Precomputed demo runs and their study ship in the image: `scripts/pack-demo.sh
-  STUDY_ID` packs a finished study and its runs into a tarball, and the build fetches it from
-  `DEMO_URL` into `demo/runs` (`--precomputed`) and `demo/studies` (`--studies-dir`), so the
-  demo never waits on a model. Live runs, their jobs database and the model cache sit in the
-  container's `runs/` and are lost on a redeploy.
+  (`api.with_frontend`). The site runs `--read-only` and calls no model, so it holds no
+  `MODEL_API_KEY`; the demo video's live run is made on the laptop. Precomputed demo runs and
+  their study ship in the image: `scripts/pack-demo.sh STUDY_ID` packs a finished study and
+  its runs into a tarball and prints its checksum, and the build fetches it from `DEMO_URL`,
+  checks it against `DEMO_SHA256`, and unpacks it into `demo/runs` (`--precomputed`) and
+  `demo/studies` (`--studies-dir`). The image runs as a non-root `app` user.
 
 ## Cost control
 

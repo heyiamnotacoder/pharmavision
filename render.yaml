@@ -1,14 +1,15 @@
-# Render blueprint for the demo site (ARCHITECTURE "Deploy"): one Docker web service, one
-# process. Set MODEL_API_KEY and DEMO_URL in the dashboard; neither is committed.
+# Render blueprint for the public demo site (ARCHITECTURE "Deploy"): one Docker web service,
+# one process, read-only. Set DEMO_URL and DEMO_SHA256 in the dashboard (scripts/pack-demo.sh
+# prints the checksum); the site starts no model calls, so it needs no MODEL_API_KEY.
 services:
   - type: web
     name: pharmavision
     runtime: docker
     plan: starter
     dockerfilePath: ./Dockerfile
-    healthCheckPath: /api/runs
+    healthCheckPath: /
     envVars:
-      - key: MODEL_API_KEY
-        sync: false
       - key: DEMO_URL
+        sync: false
+      - key: DEMO_SHA256
         sync: false

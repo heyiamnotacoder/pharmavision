@@ -5,6 +5,7 @@
     uv run python -m pharmavision finish RUN_DIR --tier contributor   # public Sturman data only
     uv run python -m pharmavision serve [--precomputed DIR]   # the HTTP API on localhost:8000
     uv run python -m pharmavision serve --frontend frontend/dist   # the site: frontend + /api
+    uv run python -m pharmavision serve --read-only --precomputed DIR --studies-dir DIR  # demo
 
 Check `arena.json` (floor and centre polygons, px) between the two steps: `finish` is the
 confirmation. Model responses are cached in runs/model_cache, so a re-run costs nothing."""
@@ -33,12 +34,19 @@ def main() -> None:
     serve.add_argument(
         "--precomputed", type=Path, default=None, help="finished run folders, served read-only"
     )
-    serve.add_argument("--studies-dir", type=Path, default=Path("studies"))
+    serve.add_argument(
+        "--studies-dir", type=Path, default=None, help="study folders (default: studies)"
+    )
     serve.add_argument(
         "--frontend",
         type=Path,
         default=None,
         help="the built frontend (frontend/dist), served at / with the API under /api",
+    )
+    serve.add_argument(
+        "--read-only",
+        action="store_true",
+        help="refuse new runs, arena confirmations and study reports: the public demo",
     )
     for step in (finish, serve):
         step.add_argument(
@@ -56,7 +64,10 @@ def main() -> None:
         from .api import ApiSettings, create_app, with_frontend
 
         judge = MuseSparkJudge(MuseSparkSettings(tier=args.tier))
-        settings = ApiSettings(studies_dir=args.studies_dir, precomputed_runs_dir=args.precomputed)
+        studies = {} if args.studies_dir is None else {"studies_dir": args.studies_dir}
+        settings = ApiSettings(
+            precomputed_runs_dir=args.precomputed, read_only=args.read_only, **studies
+        )
         app = create_app(settings, segmenter, judge, TEMPLATES)
         if args.frontend is not None:
             app = with_frontend(app, args.frontend)
