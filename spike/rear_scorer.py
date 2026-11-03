@@ -28,6 +28,7 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
+from eval.sturman import fetch_video
 from pharmavision.artifacts import MeasureSettings, RearCandidate, RearFeatures, RearScorer
 from pharmavision.judge.muse_spark import MuseSparkJudge, MuseSparkSettings
 from pharmavision.measure.open_field import open_field_metrics
@@ -37,7 +38,7 @@ from pharmavision.segmenter.config import make_segmenter
 from pharmavision.segmenter.meta_api import MetaApiSettings
 from pharmavision.stages.arena import ArenaNotFoundError
 from pharmavision.templates import OPEN_FIELD
-from spike.data import LABELS, SPLIT, VIDEOS, download
+from spike.data import LABELS, SPLIT, VIDEOS
 from spike.rear_recall import OUT as RUNS
 from spike.rears import Agreement, Rear, agreement, consensus_rears, load_rears
 
@@ -297,7 +298,7 @@ def track() -> None:
         pointer = RUNS / f"{video_id}.run"
         if pointer.exists():
             continue
-        download(video_id)
+        fetch_video(video_id)
         for prompt in FLOOR_PROMPTS:
             template = OPEN_FIELD.model_copy(update={"floor_prompt": prompt})
             try:

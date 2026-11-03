@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from eval.split import SPLIT_SEED
+
 RearKind = Literal["supported", "unsupported"]
 Truth = Literal["supported", "unsupported", "none"]
 _KINDS: dict[str, RearKind] = {"Supported": "supported", "Unsupported": "unsupported"}
@@ -97,18 +99,6 @@ def clip_window(
     start = (rear.start + rear.end) / 2 - length / 2
     start = min(max(start, 0.0), video_s - length)
     return round(start, 3), round(start + length, 3)
-
-
-SPLIT_SEED = 20261029  # the spike date; fixed so eval/split.json is reproducible
-
-
-def train_eval_split(
-    video_ids: list[str], n_train: int = 6, seed: int = SPLIT_SEED
-) -> tuple[list[str], list[str]]:
-    """Fixed random split of the open-field videos: few-shot examples come only from train."""
-    ids = sorted(video_ids)
-    train = sorted(random.Random(seed).sample(ids, n_train))
-    return train, [i for i in ids if i not in train]
 
 
 @dataclass(frozen=True)

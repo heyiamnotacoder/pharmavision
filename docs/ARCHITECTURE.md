@@ -411,6 +411,48 @@ with a fixed seed and recorded in `eval/split.json`. Few-shot examples come
 only from the train split. The eval report is generated as `eval/REPORT.md` and its numbers feed
 the demo and write-up, the same way PaedScale published its validation table.
 
+**The harness (T12a, tracking).** `python -m eval fetch | plan | track [--yes]`, laptop only.
+
+```
+fetch:  labels CSV + DLC CSVs (DLCAnalyzer @ pinned commit) + eval videos (Zenodo) → eval/data/
+plan:   eval/split.json ✓ → per-video projected SAM 3.1 spend, total
+track:  plan printed → ask → per eval video:
+          ingest → arena (floor prompts in turn, auto-confirmed) → track      [sees]
+          our centroid vs DLC body centre → tracking/<ID>.json               [measures]
+          live calls' usage and $ → spend.jsonl (also when the arena fails)
+        → tracking/summary.json; exits non-zero if any eval video has no result
+```
+
+- **Guards, every command:** `eval.guard` refuses to run unless git ignores `eval/data/` and
+  tracks nothing there or named like a DLCAnalyzer file (`AllLabData…`, `…DeepCut…`,
+  `OFT_<n>_<rater>…`); a test runs the same check in CI. `eval.split` recomputes the seeded draw
+  from the label file's IDs and refuses if `split.json` differs; nothing rewrites it.
+- **Videos by ID:** a DLC file is named by its recording (`3_01_A_…DeepCut….csv` holds OFT_11),
+  so it is found through the label rows' `DLCFile` column, never by the number in a name.
+- **Matching frames:** our frame i meets DLC frame floor((i + 0.5) × 25 / 15), the source
+  frame ingest's ffmpeg `fps` filter keeps (checked against ffmpeg on a frame-numbered video,
+  Nov 3: round(i × 25 / 15) is one source frame off on a third of the frames). DLC pixels are scaled to the normalised video
+  (1:1 for Sturman) and converted with our arena's px/cm. Frames where DLC's `bodycentre`
+  likelihood is below 0.9 are left out (it is near 0 before the animal is placed). Assumes DLC
+  ran on the 928×576 source; check its arena corners on a frame if distances look scaled.
+- **Reported per video:** % of frames tracked, % with a confident DLC frame, frames compared,
+  centroid distance in cm (mean, median, p95, max), % of compared frames ≥ 5 cm apart, the
+  10 largest disagreements (frame, time) to check by eye, and an alignment check: DLC's row
+  count beside the source's frame count, and the constant shift (±50 source frames) that
+  brings the tracks closest. OFT_11's DLC has 15,253 rows for a ~609.5 s video, so a start
+  offset is possible; a best shift far from 0 says the distances at 0 overstate. No pass
+  bar: DLC is a reference.
+- **Spend:** a metered transport wraps the Model API and logs each live response's usage
+  (tokens, video frames, images) and price (`eval.spend.PRICES`); a cached response never
+  reaches it, so it costs nothing. A model with no price is refused before it is called; a
+  response with no usage, or a stream that broke off, is logged as an unreported call, not as
+  free. The projection prices SAM 3.1's floor image and every frame
+  at 15 fps in the chunks the segmenter would send (about $1.83 per video, $25.63 for the 14).
+  Less if `runs/model_cache` (shared with the spike) already holds a video's responses; $0.0025
+  more per extra floor prompt tried. Checked Nov 3 on the real
+  label file and one DLC file: the split matches, OFT_11's DLC is 15,253 frames at 25 fps, its
+  body centre confident on 99.2% of them.
+
 ## Application layer
 
 - **Backend:** FastAPI (`api/`, T9a), served by `python -m pharmavision serve`.
