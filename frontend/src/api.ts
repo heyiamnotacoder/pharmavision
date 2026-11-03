@@ -15,7 +15,9 @@ export interface RunView {
   read_only: boolean;
   stages_done: string[];
   /** The URL serving each artifact the run has written so far, by name. */
-  artifacts: Partial<Record<"manifest" | "video" | "arena" | "track" | "metrics", string>>;
+  artifacts: Partial<
+    Record<"manifest" | "video" | "arena" | "track" | "metrics" | "events" | "qc", string>
+  >;
 }
 
 export interface Manifest {
@@ -51,6 +53,70 @@ export interface Metrics {
   immobility_s: number | null;
 }
 
+/** One judged rear candidate over frames `first_frame` to `last_frame` (inclusive). */
+export interface BehaviourEvent {
+  first_frame: number;
+  last_frame: number;
+  label: "rearing" | "none";
+  confidence: number;
+  low_confidence: boolean;
+  rationale: string;
+  source: "rule" | "model";
+}
+
+export interface Events {
+  /** In frame order. */
+  events: BehaviourEvent[];
+}
+
+/** Frames (inclusive), or the whole trial, left out of the statistics, and why. */
+export interface Exclusion {
+  scope: "trial" | "window";
+  first_frame: number;
+  last_frame: number;
+  reason: string;
+  source: "rule" | "model";
+}
+
+export interface QcFlag {
+  kind: "tracking_loss" | "out_of_arena" | "speed_jump" | "second_mask";
+  first_frame: number;
+  last_frame: number;
+  severity: "warning" | "critical";
+  reason: string;
+}
+
+export interface Qc {
+  flags: QcFlag[];
+  exclusions: Exclusion[];
+  reviews: { flag: QcFlag; verdict: "keep" | "exclude_window" | "exclude_trial"; reason: string }[];
+}
+
+/** One number in the report prose, and the computed value it matched: `source` null when none
+ * did, and its sentence is struck out of the report. */
+export interface AuditedNumber {
+  text: string;
+  sentence: string;
+  source: string | null;
+}
+
+export interface Report {
+  model_id: string;
+  /** Every draft the number audit saw; the last one is the report. */
+  drafts: { audit: { numbers: AuditedNumber[] } }[];
+  /** The report as shipped: `[TO FILL: …]` placeholders for what the system cannot know, and
+   * each sentence that failed the audit struck out and flagged. */
+  markdown: string;
+}
+
+export interface StudyView {
+  study_id: string;
+  status: JobStatus | null;
+  error: string | null;
+  stages_done: string[];
+  artifacts: Partial<Record<"design" | "trials" | "stats" | "report", string>>;
+}
+
 /** The API's root: `/api` goes through the Vite dev proxy; a deploy can point elsewhere. */
 const API_BASE: string = (import.meta.env.VITE_API_BASE as string | undefined) ?? "/api";
 
@@ -68,4 +134,6 @@ export async function getJson<T>(path: string): Promise<T> {
 export const api = {
   runs: () => getJson<RunView[]>("/runs"),
   run: (id: string) => getJson<RunView>(`/runs/${encodeURIComponent(id)}`),
+  studies: () => getJson<StudyView[]>("/studies"),
+  study: (id: string) => getJson<StudyView>(`/studies/${encodeURIComponent(id)}`),
 };

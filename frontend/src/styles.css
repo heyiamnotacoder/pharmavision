@@ -5,6 +5,13 @@
   --line: #dcdcd6;
   --accent: #2462c9;
   --warn: #a35a00;
+  --rear: #1f8a5b;
+  --none: #8a8a84;
+  --excluded: #c62828;
+  --fill-bg: #fff1c2;
+  --fill-fg: #6b4a00;
+  --struck-bg: #fde3e3;
+  --struck-fg: #9b1c1c;
   font-family:
     system-ui,
     -apple-system,
@@ -22,6 +29,13 @@
     --line: #34342f;
     --accent: #7aa7ff;
     --warn: #f0a24a;
+    --rear: #4cc38a;
+    --none: #77776f;
+    --excluded: #ff6b6b;
+    --fill-bg: #4a3a0c;
+    --fill-fg: #ffd978;
+    --struck-bg: #4a1a1a;
+    --struck-fg: #ffb4b4;
   }
 }
 
@@ -142,6 +156,132 @@ td.number {
   color: var(--muted);
 }
 
+.muted {
+  color: var(--muted);
+}
+
+h3 {
+  margin: 24px 0 4px;
+  font-size: 1.05rem;
+}
+
+/* Timeline: one bar per lane, the trial's frames left to right. */
+.timeline {
+  margin-top: 10px;
+}
+
+.lane {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0;
+  font-size: 0.85rem;
+}
+
+.lane-name {
+  flex: 0 0 120px;
+  color: var(--muted);
+}
+
+.bar {
+  position: relative;
+  flex: 1;
+  height: 18px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+
+.bar button {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  min-width: 3px;
+  padding: 0;
+  border: 0;
+  border-radius: 1px;
+  cursor: pointer;
+}
+
+.bar button:hover,
+.bar button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  z-index: 1;
+}
+
+.event.rearing {
+  background: var(--rear);
+}
+
+.event.none {
+  background: var(--none);
+}
+
+/* A low-confidence event: reported as uncertain, so drawn hatched. */
+.event.low {
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent 0 2px,
+    rgba(255, 255, 255, 0.6) 2px 4px
+  );
+}
+
+.exclusion {
+  background: var(--excluded);
+  opacity: 0.8;
+}
+
+.playhead {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 0;
+  border-left: 2px solid var(--fg);
+  pointer-events: none;
+}
+
+button.link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* The report: placeholders and struck-out sentences must never read as audited prose. */
+.report {
+  margin-top: 12px;
+  line-height: 1.55;
+}
+
+.report .audit {
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+mark.to-fill {
+  padding: 0 3px;
+  border: 1px dashed var(--fill-fg);
+  border-radius: 3px;
+  background: var(--fill-bg);
+  color: var(--fill-fg);
+  font-style: normal;
+}
+
+del.struck {
+  background: var(--struck-bg);
+  color: var(--struck-fg);
+  text-decoration-thickness: 2px;
+}
+
+.audit-flag {
+  color: var(--struck-fg);
+  font-size: 0.85em;
+}
+
 @media (max-width: 640px) {
   .legend {
     float: none;
@@ -150,5 +290,8 @@ td.number {
   th,
   td {
     padding: 6px 4px;
+  }
+  .lane-name {
+    flex-basis: 80px;
   }
 }
