@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } fro
 import {
   api,
   apiUrl,
+  RESTING,
   getJson,
   type Arena,
   type Events,
@@ -16,6 +17,7 @@ import { COLOURS, drawPolygon, drawPathTail, maskImage, pathTail, type Position 
 import { MetricsTable } from "./MetricsTable";
 import { QcList } from "./QcList";
 import { Timeline } from "./Timeline";
+import { ZoneEditor } from "./ZoneEditor";
 
 /** How much of the path the overlay keeps behind the animal. */
 const TAIL_SECONDS = 10;
@@ -23,6 +25,7 @@ const TAIL_SECONDS = 10;
 /** A run that has been ingested: its manifest and video exist. Each later artifact is null
  * until its stage has run, and the viewer says so instead of failing. */
 interface RunData {
+  view: RunView;
   manifest: Manifest;
   videoUrl: string;
   arena: Arena | null;
@@ -40,7 +43,8 @@ async function optional<T>(url: string | undefined): Promise<T | null> {
 }
 
 async function loadRun(runId: string): Promise<RunData> {
-  const { artifacts }: RunView = await api.run(runId);
+  const view = await api.run(runId);
+  const { artifacts } = view;
   if (artifacts.manifest === undefined || artifacts.video === undefined) {
     throw new NotIngestedError(`run ${runId} has not been ingested yet`);
   }
@@ -52,13 +56,19 @@ async function loadRun(runId: string): Promise<RunData> {
     optional<Events>(artifacts.events),
     optional<Qc>(artifacts.qc),
   ]);
-  return { manifest, videoUrl: apiUrl(artifacts.video), arena, track, metrics, events, qc };
+  return { view, manifest, videoUrl: apiUrl(artifacts.video), arena, track, metrics, events, qc };
 }
 
 /** Mount with `key={runId}`: its state belongs to one run. */
 export function RunViewer({ runId }: { runId: string }) {
   const [data, setData] = useState<RunData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** Bumped to load the run again: once its zones are confirmed, and as its stages finish. */
+  const [loads, setLoads] = useState(0);
+  const reload = useCallback(() => {
+    setLoads((n) => n + 1);
+  }, []);
+  const running = data !== null && !RESTING.has(data.view.status);
   const videoRef = useRef<HTMLVideoElement>(null);
   const fps = data?.manifest.video.fps;
   const seek = useCallback(
@@ -81,7 +91,22 @@ export function RunViewer({ runId }: { runId: string }) {
     return () => {
       live = false;
     };
-  }, [runId]);
+  }, [runId, loads]);
+
+  // While the run's stages run, each one it finishes (and the status it rests in) loads it
+  // again, so the viewer fills in as artifacts appear.
+  useEffect(() => {
+    if (!running || typeof EventSource === "undefined") return;
+    const source = new EventSource(apiUrl(`/runs/${encodeURIComponent(runId)}/stream`));
+    source.addEventListener("stage", reload);
+    source.addEventListener("status", () => {
+      source.close();
+      reload();
+    });
+    return () => {
+      source.close();
+    };
+  }, [runId, running, reload]);
 
   if (error)
     return (
@@ -90,9 +115,34 @@ export function RunViewer({ runId }: { runId: string }) {
       </p>
     );
   if (!data) return <p>Loading run {runId}…</p>;
+  const { view, arena, manifest } = data;
+  const backgroundUrl = view.artifacts.background;
+  const atGate = view.status === "awaiting zone confirmation" && !view.read_only;
   return (
     <section className="viewer">
       <h2>Run {runId}</h2>
+      {atGate && arena && backgroundUrl ? (
+        <ZoneEditor
+          runId={runId}
+          backgroundUrl={apiUrl(backgroundUrl)}
+          width={manifest.video.width}
+          height={manifest.video.height}
+          arena={arena}
+          centreFraction={manifest.template.centre_area_fraction}
+          onConfirmed={reload}
+        />
+      ) : null}
+      {running && arena?.confirmed ? (
+        <p className="status">
+          Zones confirmed: {view.stage ?? "the next stage"} is running ({view.stages_done.length}{" "}
+          stages done).
+        </p>
+      ) : null}
+      {view.status === "failed" ? (
+        <p className="error">
+          The run failed{view.stage ? ` at ${view.stage}` : ""}: {view.error}
+        </p>
+      ) : null}
       <OverlayPlayer {...data} videoRef={videoRef} onSeek={seek} />
       {data.metrics ? (
         <MetricsTable metrics={data.metrics} measureVersion={data.manifest.measure.version} />

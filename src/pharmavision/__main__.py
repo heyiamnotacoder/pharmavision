@@ -12,7 +12,7 @@ import argparse
 from pathlib import Path
 
 from .judge.muse_spark import MuseSparkJudge, MuseSparkSettings
-from .pipeline import RunFolder, confirm_arena, finish_run, start_run
+from .pipeline import InvalidFloorError, RunFolder, confirm_arena, finish_run, start_run
 from .segmenter.config import make_segmenter
 from .segmenter.meta_api import MetaApiSettings
 from .templates import OPEN_FIELD, TEMPLATES
@@ -57,9 +57,14 @@ def main() -> None:
         args.runs_dir.mkdir(parents=True, exist_ok=True)
         run = start_run(args.video, OPEN_FIELD, segmenter, args.runs_dir)
         print(f"{run.path}\n{run.arena().model_dump_json(indent=2)}")
+        if not run.arena().floor_px:
+            print("no floor found: draw it in the zone editor (`serve`) before `finish`")
     else:
         run = RunFolder(args.run_dir)
-        confirm_arena(run)
+        try:
+            confirm_arena(run)
+        except InvalidFloorError as e:
+            parser.error(f"{run.path}: {e} (in the zone editor, `serve`)")
         judge = MuseSparkJudge(MuseSparkSettings(tier=args.tier))
         metrics = finish_run(run, segmenter, judge)
         frames = run.track().frames

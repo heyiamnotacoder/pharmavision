@@ -13,6 +13,7 @@ from typing import Annotated
 
 from fastapi import (
     BackgroundTasks,
+    Body,
     Depends,
     FastAPI,
     File,
@@ -28,11 +29,13 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ..artifacts import RunArtifactName, RunFolder, StudyArtifactName, StudyFolder
 from ..judge import Judge
+from ..measure.geometry import Point
 from ..pipeline import (
     START_STAGES,
+    InvalidFloorError,
     Stage,
     StageDone,
-    confirm_arena,
+    arena_to_confirm,
     finish_run,
     new_run_id,
     start_run,
@@ -41,7 +44,7 @@ from ..pipeline import (
 )
 from ..segmenter import Segmenter
 from ..templates import TestTemplate
-from .jobs import RESTING, JobKind, JobStatus, JobStore
+from .jobs import AT_GATE, RESTING, JobKind, JobStatus, JobStore
 
 log = logging.getLogger(__name__)
 
@@ -96,6 +99,15 @@ class RunView(BaseModel):
     """A precomputed run: served as it is, never re-run or confirmed."""
     stages_done: list[str]
     artifacts: dict[str, str]
+
+
+class ArenaEdit(BaseModel):
+    """The floor as the scientist left it in the zone editor: corners moved, or drawn where
+    none was found. Only the floor: the centre zone and the scale are derived from it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    floor_px: list[Point]
 
 
 class StudyView(BaseModel):
@@ -225,7 +237,7 @@ def create_app(
                 )
             finally:
                 shutil.rmtree(upload.parent, ignore_errors=True)
-            return "awaiting zone confirmation"
+            return AT_GATE
 
         background.add_task(_run_job, store, "run", run_id, START_STAGES, work)
         return view(run_id)
@@ -235,17 +247,38 @@ def create_app(
         return view(run_id)
 
     @app.post("/runs/{run_id}/arena/confirm", status_code=202)
-    def confirm(run_id: str, background: BackgroundTasks) -> RunView:
-        """The human gate: the scientist has checked the zones. Every later stage then runs in
-        the background. Refused (409) unless the run is waiting at the gate."""
+    def confirm(
+        run_id: str,
+        background: BackgroundTasks,
+        edit: Annotated[ArenaEdit | None, Body()] = None,
+    ) -> RunView:
+        """The human gate: the scientist has checked the zones, and sends the floor if they
+        moved or drew its corners. The confirmed arena is written before the response, then
+        every later stage runs in the background. Refused (409) unless the run is waiting at
+        the gate, and (422), leaving it there, for a floor the zones can't come from or for
+        none where none was found."""
         run, read_only = find(run_id)
         if read_only:
             raise HTTPException(409, f"run {run_id} is precomputed: served as it is")
-        if not store.claim("run", run_id, expected="awaiting zone confirmation"):
-            raise HTTPException(409, f"run {run_id} is {view(run_id).status}, not at the gate")
+
+        def not_at_gate() -> HTTPException:
+            return HTTPException(409, f"run {run_id} is {view(run_id).status}, not at the gate")
+
+        if view(run_id).status != AT_GATE:  # before the floor: a failed run may have no arena
+            raise not_at_gate()
+        try:
+            arena = arena_to_confirm(run, edit and edit.floor_px)
+        except InvalidFloorError as e:
+            raise HTTPException(422, str(e)) from e
+        if not store.claim("run", run_id, expected=AT_GATE):
+            raise not_at_gate()
+        try:
+            run.write_arena(arena)
+        except BaseException:
+            store.update("run", run_id, AT_GATE)  # nothing confirmed: back at the gate
+            raise
 
         def work(done: StageDone) -> JobStatus:
-            confirm_arena(run)
             finish_run(run, segmenter, judge, on_stage_done=done)
             return "done"
 
@@ -291,6 +324,14 @@ def create_app(
         if not run.has("video"):
             raise HTTPException(404, f"run {run_id} has no video yet")
         return FileResponse(run.video_path, media_type="video/mp4")
+
+    @app.get("/runs/{run_id}/background", response_model=None)
+    def get_background(run_id: str) -> FileResponse:
+        """The background frame the arena stage looked for the floor on, for the zone editor."""
+        run, _ = find(run_id)
+        if not run.has("background"):
+            raise HTTPException(404, f"run {run_id} has no background frame yet")
+        return FileResponse(run.background_path, media_type="image/png")
 
     def study_folder(study_id: str) -> StudyFolder:
         study = StudyFolder(settings.studies_dir / study_id)
@@ -398,13 +439,14 @@ def _precomputed_status(
     if len(done) == len(STAGE_ARTIFACTS):
         return "done", None, None
     if done[-1] == "arena" and not run.arena().confirmed:
-        return "awaiting zone confirmation", None, None
+        return AT_GATE, None, None
     return "failed", None, f"the precomputed run stops after {done[-1]}"
 
 
 def _artifact_urls(base: str, folder: RunFolder | StudyFolder) -> dict[str, str]:
+    served_as_files = ("video", "background")  # as they are, not as JSON artifacts
     return {
-        name: f"{base}/video" if name == "video" else f"{base}/artifacts/{name}"
+        name: f"{base}/{name}" if name in served_as_files else f"{base}/artifacts/{name}"
         for name in folder.FILES
         if folder.has(name)
     }

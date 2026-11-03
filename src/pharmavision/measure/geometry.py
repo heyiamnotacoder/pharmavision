@@ -4,8 +4,28 @@ import math
 from collections.abc import Sequence
 
 import numpy as np
+from shapely.geometry import Polygon
 
 Point = tuple[float, float]
+
+
+class InvalidFloorError(ValueError):
+    pass
+
+
+def check_floor(floor: Sequence[Point], width: int, height: int) -> None:
+    """Refuse a floor the zones can't be derived from: fewer than 3 corners, a corner off the
+    `width` x `height` frame, edges that cross, or no area."""
+    if len(floor) < 3:
+        raise InvalidFloorError(f"a floor needs at least 3 corners, not {len(floor)}")
+    off = [p for p in floor if not (0 <= p[0] <= width and 0 <= p[1] <= height)]
+    if off:
+        raise InvalidFloorError(f"corner {off[0]} is outside the {width} x {height} px frame")
+    polygon = Polygon(floor)
+    if polygon.convex_hull.area == 0:
+        raise InvalidFloorError("the floor has no area: its corners are on one line")
+    if not polygon.is_valid:
+        raise InvalidFloorError("the floor's edges cross")
 
 
 def polygon_area(polygon: Sequence[Point]) -> float:

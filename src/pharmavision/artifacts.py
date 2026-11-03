@@ -258,12 +258,24 @@ class Manifest(Artifact):
 
 class Arena(Artifact):
     """Zones in pixels of the normalised video. Downstream stages refuse to run until a human
-    has confirmed them."""
+    has confirmed them. Empty (no floor, no centre, `px_per_cm` 0) when SAM 3.1 found no floor:
+    the scientist draws it, and only a floor can be confirmed."""
 
     floor_px: list[Point]
     centre_px: list[Point]
-    px_per_cm: float
+    """Always derived from the floor in code, never drawn."""
+    px_per_cm: float = Field(ge=0)
+    """From the floor's area and the arena's real size: 0 with no floor."""
     confirmed: bool
+
+    @model_validator(mode="after")
+    def _whole_or_empty_and_only_a_floor_confirmed(self) -> "Arena":
+        empty = (not self.floor_px, not self.centre_px, self.px_per_cm == 0)
+        if any(empty) and not all(empty):
+            raise ValueError("an arena has a floor, a centre and a scale, or none of them")
+        if self.confirmed and all(empty):
+            raise ValueError("an arena without a floor cannot be confirmed")
+        return self
 
 
 class TrackFrame(Artifact):
@@ -803,6 +815,7 @@ class RunFolder(_ArtifactFolder):
         "manifest": "manifest.json",
         "video": "video.mp4",
         "arena": "arena.json",
+        "background": "background.png",
         "track": "track.parquet",
         "metrics": "metrics.json",
         "events": "events.parquet",
@@ -816,6 +829,12 @@ class RunFolder(_ArtifactFolder):
     @property
     def video_path(self) -> Path:
         return self.path / self.FILES["video"]
+
+    @property
+    def background_path(self) -> Path:
+        """The background frame the floor was looked for on, which the zone editor draws on:
+        a PNG beside the artifacts, written by the arena stage."""
+        return self.path / self.FILES["background"]
 
     def read(self, name: RunArtifactName) -> Artifact:
         """Any artifact by its name."""

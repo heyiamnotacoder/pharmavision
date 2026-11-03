@@ -29,20 +29,21 @@ from .artifacts import (
     StudyStats,
 )
 from .judge import Judge
+from .measure.geometry import InvalidFloorError, Point, check_floor
 from .segmenter import Segmenter
 from .stages import arena, behaviours, ingest, measure, qc, report, stats, track
-from .stages.arena import ArenaNotFoundError
 from .stages.ingest import VideoTooShortError
 from .templates import TestTemplate
 
 __all__ = [
     "ArenaNotConfirmedError",
-    "ArenaNotFoundError",
+    "InvalidFloorError",
     "RunFolder",
     "Stage",
     "StudyFolder",
     "StudyNotReadyError",
     "VideoTooShortError",
+    "arena_to_confirm",
     "confirm_arena",
     "finish_run",
     "new_run_id",
@@ -87,8 +88,9 @@ def start_run(
     run_id: str | None = None,
     on_stage_done: StageDone = lambda _: None,
 ) -> RunFolder:
-    """Ingest the video into a new run folder and detect the arena, which waits unconfirmed.
-    All or nothing: if the video is too short or no floor is found, no run folder is left.
+    """Ingest the video into a new run folder and detect the arena, which waits unconfirmed:
+    empty if no floor was found, for the scientist to draw. All or nothing: if the video is too
+    short, or a stage fails, no run folder is left.
     `run_id` names the folder (a fresh `new_run_id()` by default); `on_stage_done` hears
     "ingest" and then "arena"."""
     ingest_settings = ingest_settings or IngestSettings()
@@ -114,7 +116,7 @@ def start_run(
             )
         )
         on_stage_done("ingest")
-        run.write_arena(arena.detect(run, segmenter))
+        run.write_arena(arena.run(run, segmenter))
         _record_model(run, "arena", segmenter.model_id)
         on_stage_done("arena")
     except BaseException:
@@ -123,11 +125,28 @@ def start_run(
     return run
 
 
-def confirm_arena(run: RunFolder) -> Arena:
-    """The human gate: the scientist has checked the zones over a frame of the video."""
-    confirmed = run.arena().model_copy(update={"confirmed": True})
+def confirm_arena(run: RunFolder, floor_px: list[Point] | None = None) -> Arena:
+    """The human gate: the scientist has checked the zones over the background frame. With
+    `floor_px`, the floor as they edited or drew it, and the centre zone and the scale derived
+    from it again. Raises InvalidFloorError, confirming nothing, for a floor the zones can't
+    come from, or for no floor at all."""
+    confirmed = arena_to_confirm(run, floor_px)
     run.write_arena(confirmed)
     return confirmed
+
+
+def arena_to_confirm(run: RunFolder, floor_px: list[Point] | None = None) -> Arena:
+    """The arena `confirm_arena` would write, checked but not written: so a caller can refuse a
+    floor before it commits to confirming."""
+    if floor_px is None:
+        current = run.arena()
+        if not current.floor_px:
+            raise InvalidFloorError("no floor was found: draw the floor before confirming")
+    else:
+        manifest = run.manifest()
+        check_floor(floor_px, manifest.video.width, manifest.video.height)
+        current = arena.zones(floor_px, manifest.template)
+    return current.model_copy(update={"confirmed": True})
 
 
 def finish_run(

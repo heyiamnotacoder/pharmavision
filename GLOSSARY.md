@@ -12,6 +12,14 @@ _Avoid_: Job, analysis, session
 The API working on a run or a study in the background: a run's stages up to the arena gate, then the stages after it, or a study's report. Its status (queued, running, awaiting zone confirmation, done, failed) is kept in SQLite. A run is what is processed; a job is the processing in progress, so a run is never called a job.
 _Avoid_: Task, worker
 
+**Arena gate**:
+The one human check in the pipeline. A run stops after the arena stage until a person confirms its zones in the zone editor, where they may move the floor's corners or draw them. Only the floor is ever edited: the centre zone and the scale (px/cm) are derived from it.
+_Avoid_: Approval, review (the model reviews QC flags, not zones)
+
+**Empty arena**:
+The arena a run waits at the gate with when SAM 3.1 found no usable floor: no floor, no centre zone, no scale. It cannot be confirmed until a floor is drawn.
+_Avoid_: Failed arena, missing arena
+
 **Trial**:
 One animal tested once in one behaviour test. The trial is the unit that enters the statistics; in the open field MVP, one video holds exactly one trial.
 _Avoid_: Run, video, subject, session
